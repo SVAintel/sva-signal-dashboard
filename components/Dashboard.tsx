@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
@@ -29,6 +30,7 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -108,6 +110,14 @@ export default function Dashboard() {
             >
               [SWITCH]
             </button>
+            <span className="text-slate-700">•</span>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="text-slate-600 hover:text-cyan-400 transition"
+              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            >
+              {sidebarOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            </button>
           </div>
 
           <div className="text-[10px] text-slate-600">
@@ -140,6 +150,7 @@ export default function Dashboard() {
         </div>
 
         {/* Sidebar with Tabs */}
+        {sidebarOpen && (
         <div className="w-[420px] flex flex-col bg-[#080d1a] border-l border-[#1e3a5f]">
           {/* Tab Buttons */}
           <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
@@ -174,6 +185,7 @@ export default function Dashboard() {
             {activeTab === "stocks" && <StockMarketPanel />}
           </div>
         </div>
+        )}
       </div>
 
       {/* Event Detail Modal */}
