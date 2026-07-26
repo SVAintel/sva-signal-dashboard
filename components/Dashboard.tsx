@@ -46,7 +46,7 @@ export default function Dashboard() {
     };
 
     fetchEvents();
-    const interval = setInterval(fetchEvents, 60000);
+    const interval = setInterval(fetchEvents, 1800000); // 30 minutes
     return () => clearInterval(interval);
   }, [userProfile, selectedCategory]);
 
