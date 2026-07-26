@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
+import LiveBroadcasts from "./LiveBroadcasts";
 import EventDetailPanel from "./EventDetailPanel";
 import { useStore } from "@/store/useStore";
 import { Event } from "@/lib/types";
@@ -19,7 +20,7 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
   market: { label: "MKT", color: "#22d3ee" },
 };
 
-type SidebarTab = "events" | "news" | "stocks";
+type SidebarTab = "events" | "news" | "stocks" | "live";
 
 export default function Dashboard() {
   const { userProfile, selectedCategory, setSelectedCategory, setUserProfile } = useStore();
@@ -122,7 +123,7 @@ export default function Dashboard() {
         <div className="w-[420px] flex flex-col bg-[#080d1a] border-r border-[#1e3a5f]">
           {/* Tab Buttons */}
           <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
-            {(["events", "news", "stocks"] as SidebarTab[]).map((tab) => (
+            {(["events", "news", "stocks", "live"] as SidebarTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -135,6 +136,7 @@ export default function Dashboard() {
                 {tab === "events" && "SIGNALS"}
                 {tab === "news" && "NEWS"}
                 {tab === "stocks" && "MARKETS"}
+                {tab === "live" && "🔴 LIVE"}
               </button>
             ))}
           </div>
@@ -151,6 +153,7 @@ export default function Dashboard() {
             )}
             {activeTab === "news" && <NewsPanel />}
             {activeTab === "stocks" && <StockMarketPanel />}
+            {activeTab === "live" && <LiveBroadcasts />}
           </div>
         </div>
 
