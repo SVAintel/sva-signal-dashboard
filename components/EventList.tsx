@@ -2,11 +2,17 @@
 
 import { Event } from "@/lib/types";
 
-const categoryColors: Record<string, string> = {
-  war: "bg-red-900 text-red-100",
-  counter_terrorism: "bg-purple-900 text-purple-100",
-  natural_disaster: "bg-amber-900 text-amber-100",
-  market: "bg-blue-900 text-blue-100",
+const categoryMeta: Record<string, { label: string; color: string; bg: string }> = {
+  war:               { label: "WAR",     color: "#ef4444", bg: "#1a0a0a" },
+  counter_terrorism: { label: "C-TER",   color: "#a855f7", bg: "#130a1a" },
+  natural_disaster:  { label: "GEO",     color: "#f59e0b", bg: "#1a120a" },
+  market:            { label: "MARKET",  color: "#22d3ee", bg: "#0a141a" },
+};
+
+const confidenceDot: Record<string, string> = {
+  high: "#22c55e",
+  medium: "#f59e0b",
+  low: "#ef4444",
 };
 
 export default function EventList({
@@ -22,58 +28,98 @@ export default function EventList({
 }) {
   if (loading) {
     return (
-      <div className="rounded-lg bg-slate-800 p-4">
-        <div className="animate-pulse space-y-3">
-          <div className="h-12 rounded bg-slate-700" />
-          <div className="h-12 rounded bg-slate-700" />
-          <div className="h-12 rounded bg-slate-700" />
+      <div className="flex-1 p-4">
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-14 animate-pulse rounded border border-[#1e3a5f] bg-[#0a1020]" />
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-bold text-white">Events</h2>
-      <div className="max-h-[calc(100vh-200px)] space-y-2 overflow-y-auto rounded-lg bg-slate-800 p-3">
-        {events.map((event) => (
-          <button
-            key={event.id}
-            onClick={() => onSelectEvent(event)}
-            className={`w-full rounded-lg p-3 text-left transition ${
-              selectedEvent?.id === event.id
-                ? "bg-slate-600 ring-2 ring-blue-500"
-                : "bg-slate-700 hover:bg-slate-600"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="font-semibold text-white">{event.title}</div>
-                <div className="text-xs text-slate-400">{event.source}</div>
-              </div>
-              <span
-                className={`whitespace-nowrap rounded px-2 py-1 text-xs font-semibold ${
-                  categoryColors[event.category] || "bg-slate-600 text-slate-300"
-                }`}
-              >
-                {event.category.replace(/_/g, " ")}
-              </span>
-            </div>
-            {selectedEvent?.id === event.id && (
-              <div className="mt-3 space-y-2 border-t border-slate-600 pt-3">
-                <p className="text-sm text-slate-300">{event.description}</p>
-                <div className="text-xs text-slate-400">
-                  <div>
-                    <strong>AI Analyst Notes:</strong> {event.aiNotes}
-                  </div>
-                  <div>
-                    <strong>Confidence:</strong> {event.confidence}
-                  </div>
+    <div className="flex h-full flex-col">
+      {/* Sidebar header */}
+      <div className="border-b border-[#1e3a5f] px-4 py-2">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+          Signal Feed
+        </div>
+      </div>
+
+      {/* Event list */}
+      <div className="flex-1 overflow-y-auto">
+        {events.length === 0 && (
+          <div className="p-6 text-center text-xs text-slate-600 uppercase tracking-widest">
+            No signals detected
+          </div>
+        )}
+        {events.map((event) => {
+          const meta = categoryMeta[event.category] || categoryMeta.war;
+          const isSelected = selectedEvent?.id === event.id;
+          return (
+            <button
+              key={event.id}
+              onClick={() => onSelectEvent(isSelected ? null : event)}
+              style={isSelected ? { borderLeftColor: meta.color } : {}}
+              className={`w-full border-b border-[#1e3a5f] border-l-2 p-3 text-left transition ${
+                isSelected
+                  ? "bg-[#0d1625]"
+                  : "border-l-transparent hover:bg-[#0a1020]"
+              }`}
+            >
+              {/* Category + confidence */}
+              <div className="mb-1 flex items-center justify-between">
+                <span
+                  className="text-[9px] font-bold uppercase tracking-widest"
+                  style={{ color: meta.color }}
+                >
+                  {meta.label}
+                </span>
+                <div className="flex items-center gap-1">
+                  <div
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: confidenceDot[event.confidence] || "#64748b" }}
+                  />
+                  <span className="text-[9px] uppercase tracking-wider text-slate-600">
+                    {event.confidence}
+                  </span>
                 </div>
               </div>
-            )}
-          </button>
-        ))}
+
+              {/* Title */}
+              <div className="text-[12px] font-semibold leading-tight text-slate-200">
+                {event.title}
+              </div>
+
+              {/* Source + timestamp */}
+              <div className="mt-1 flex items-center justify-between">
+                <span className="text-[10px] text-slate-600">{event.source}</span>
+                <span className="text-[9px] text-slate-700">
+                  {new Date(event.timestamp).toISOString().slice(11, 16)}Z
+                </span>
+              </div>
+
+              {/* Expanded analyst view */}
+              {isSelected && (
+                <div
+                  className="mt-3 space-y-2 border-t pt-3 text-[11px]"
+                  style={{ borderColor: meta.color + "33" }}
+                >
+                  <p className="text-slate-400 leading-relaxed">{event.description}</p>
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: meta.color }}>
+                      Analyst Assessment
+                    </div>
+                    <div className="text-slate-500">
+                      <span className="text-slate-400">▸ </span>{event.aiNotes}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

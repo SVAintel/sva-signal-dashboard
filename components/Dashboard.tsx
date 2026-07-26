@@ -9,22 +9,28 @@ import axios from "axios";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 
+const categoryLabels: Record<string, { label: string; color: string }> = {
+  war: { label: "WAR", color: "#ef4444" },
+  counter_terrorism: { label: "CT", color: "#a855f7" },
+  natural_disaster: { label: "GEO", color: "#f59e0b" },
+  market: { label: "MKT", color: "#22d3ee" },
+};
+
 export default function Dashboard() {
-  const { userProfile, selectedCategory } = useStore();
+  const { userProfile, selectedCategory, setSelectedCategory, setUserProfile } = useStore();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
 
   useEffect(() => {
     const fetchEvents = async () => {
       try {
         const res = await axios.get("/api/events", {
-          params: {
-            profile: userProfile,
-            category: selectedCategory,
-          },
+          params: { profile: userProfile, category: selectedCategory },
         });
         setEvents(res.data);
+        setLastUpdated(new Date().toUTCString().replace("GMT", "Z"));
       } catch (error) {
         console.error("Failed to fetch events:", error);
       } finally {
@@ -33,22 +39,98 @@ export default function Dashboard() {
     };
 
     fetchEvents();
-    const interval = setInterval(fetchEvents, 60000); // Refresh every minute
+    const interval = setInterval(fetchEvents, 60000);
     return () => clearInterval(interval);
   }, [userProfile, selectedCategory]);
 
+  const categories = ["all", "war", "counter_terrorism", "natural_disaster", "market"];
+
   return (
-    <div className="flex h-screen gap-4 bg-slate-900 p-4">
-      <div className="flex-1 rounded-lg bg-slate-800 shadow-lg">
-        <WorldMap events={events} selectedEvent={selectedEvent} />
-      </div>
-      <div className="w-96 space-y-4">
-        <EventList
-          events={events}
-          loading={loading}
-          onSelectEvent={(event) => setSelectedEvent(event)}
-          selectedEvent={selectedEvent}
-        />
+    <div className="flex h-screen flex-col bg-[#060a14] text-slate-200">
+      {/* Top Bar */}
+      <header className="flex items-center justify-between border-b border-[#1e3a5f] bg-[#080d1a] px-6 py-2">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
+            <span className="text-xs font-bold uppercase tracking-widest text-cyan-400">SVA Signal</span>
+          </div>
+          <span className="text-xs text-slate-500">|</span>
+          <span className="text-xs uppercase tracking-widest text-slate-500">
+            Global Intelligence Dashboard
+          </span>
+        </div>
+
+        <div className="flex items-center gap-6">
+          {/* Category filters */}
+          <div className="flex gap-1">
+            {categories.map((cat) => {
+              const meta = cat !== "all" ? categoryLabels[cat] : null;
+              const active = (selectedCategory ?? "all") === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat === "all" ? null : cat)}
+                  style={active && meta ? { borderColor: meta.color, color: meta.color } : {}}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
+                    active
+                      ? "bg-[#0f172a]"
+                      : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {cat === "all" ? "ALL" : categoryLabels[cat].label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-3 text-[10px] text-slate-500">
+            <span>PROFILE: <span className="text-cyan-400 font-bold">{userProfile?.toUpperCase()}</span></span>
+            <button
+              onClick={() => setUserProfile(null)}
+              className="text-slate-600 hover:text-slate-400 transition"
+            >
+              [SWITCH]
+            </button>
+          </div>
+
+          <div className="text-[10px] text-slate-600">
+            UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Map */}
+        <div className="relative flex-1 border-r border-[#1e3a5f]">
+          {/* Map legend */}
+          <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-2 text-[10px] backdrop-blur">
+            {Object.entries(categoryLabels).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5">
+                <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
+                <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Event count badge */}
+          <div className="absolute right-4 top-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-1 text-[10px] backdrop-blur">
+            <span className="font-bold text-cyan-400">{events.length}</span>
+            <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
+          </div>
+
+          <WorldMap events={events} selectedEvent={selectedEvent} />
+        </div>
+
+        {/* Event Sidebar */}
+        <div className="w-[340px] flex flex-col bg-[#080d1a]">
+          <EventList
+            events={events}
+            loading={loading}
+            onSelectEvent={(event) => setSelectedEvent(event)}
+            selectedEvent={selectedEvent}
+          />
+        </div>
       </div>
     </div>
   );
