@@ -20,7 +20,7 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
   market: { label: "MKT", color: "#22d3ee" },
 };
 
-type SidebarTab = "events" | "news" | "stocks" | "live";
+type SidebarTab = "events" | "news" | "stocks";
 
 export default function Dashboard() {
   const { userProfile, selectedCategory, setSelectedCategory, setUserProfile } = useStore();
@@ -123,7 +123,7 @@ export default function Dashboard() {
         <div className="w-[420px] flex flex-col bg-[#080d1a] border-r border-[#1e3a5f]">
           {/* Tab Buttons */}
           <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
-            {(["events", "news", "stocks", "live"] as SidebarTab[]).map((tab) => (
+            {(["events", "news", "stocks"] as SidebarTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -136,24 +136,31 @@ export default function Dashboard() {
                 {tab === "events" && "SIGNALS"}
                 {tab === "news" && "NEWS"}
                 {tab === "stocks" && "MARKETS"}
-                {tab === "live" && "🔴 LIVE"}
               </button>
             ))}
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden flex flex-col">
             {activeTab === "events" && (
-              <EventList
-                events={events}
-                loading={loading}
-                onSelectEvent={handleEventSelect}
-                selectedEvent={selectedEvent}
-              />
+              <>
+                {/* Signals scrollbox - fixed height for ~6-8 items */}
+                <div className="h-[360px] shrink-0 overflow-y-auto border-b border-[#1e3a5f]">
+                  <EventList
+                    events={events}
+                    loading={loading}
+                    onSelectEvent={handleEventSelect}
+                    selectedEvent={selectedEvent}
+                  />
+                </div>
+                {/* Live feed below */}
+                <div className="flex-1 overflow-hidden">
+                  <LiveBroadcasts />
+                </div>
+              </>
             )}
             {activeTab === "news" && <NewsPanel />}
             {activeTab === "stocks" && <StockMarketPanel />}
-            {activeTab === "live" && <LiveBroadcasts />}
           </div>
         </div>
 
