@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import EventList from "./EventList";
+import NewsPanel from "./NewsPanel";
+import StockMarketPanel from "./StockMarketPanel";
 import { useStore } from "@/store/useStore";
 import { Event } from "@/lib/types";
 import axios from "axios";
@@ -16,12 +18,15 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
   market: { label: "MKT", color: "#22d3ee" },
 };
 
+type SidebarTab = "events" | "news" | "stocks";
+
 export default function Dashboard() {
   const { userProfile, selectedCategory, setSelectedCategory, setUserProfile } = useStore();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<SidebarTab>("events");
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -122,14 +127,40 @@ export default function Dashboard() {
           <WorldMap events={events} selectedEvent={selectedEvent} />
         </div>
 
-        {/* Event Sidebar */}
-        <div className="w-[340px] flex flex-col bg-[#080d1a]">
-          <EventList
-            events={events}
-            loading={loading}
-            onSelectEvent={(event) => setSelectedEvent(event)}
-            selectedEvent={selectedEvent}
-          />
+        {/* Sidebar with Tabs */}
+        <div className="w-[420px] flex flex-col bg-[#080d1a] border-l border-[#1e3a5f]">
+          {/* Tab Buttons */}
+          <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
+            {(["events", "news", "stocks"] as SidebarTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
+                  activeTab === tab
+                    ? "border-cyan-400 text-cyan-400 bg-[#1a2847]"
+                    : "border-transparent text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {tab === "events" && "SIGNALS"}
+                {tab === "news" && "NEWS"}
+                {tab === "stocks" && "MARKETS"}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === "events" && (
+              <EventList
+                events={events}
+                loading={loading}
+                onSelectEvent={(event) => setSelectedEvent(event)}
+                selectedEvent={selectedEvent}
+              />
+            )}
+            {activeTab === "news" && <NewsPanel />}
+            {activeTab === "stocks" && <StockMarketPanel />}
+          </div>
         </div>
       </div>
     </div>
