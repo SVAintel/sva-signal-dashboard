@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
+import EventDetailPanel from "./EventDetailPanel";
 import { useStore } from "@/store/useStore";
 import { Event } from "@/lib/types";
 import axios from "axios";
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
 
@@ -49,6 +51,13 @@ export default function Dashboard() {
   }, [userProfile, selectedCategory]);
 
   const categories = ["all", "war", "counter_terrorism", "natural_disaster", "market"];
+
+  const handleEventSelect = (event: Event | null) => {
+    setSelectedEvent(event);
+    if (event) {
+      setDetailPanelOpen(true);
+    }
+  };
 
   return (
     <div className="flex h-screen flex-col bg-[#060a14] text-slate-200">
@@ -154,7 +163,7 @@ export default function Dashboard() {
               <EventList
                 events={events}
                 loading={loading}
-                onSelectEvent={(event) => setSelectedEvent(event)}
+                onSelectEvent={handleEventSelect}
                 selectedEvent={selectedEvent}
               />
             )}
@@ -163,6 +172,12 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Event Detail Modal */}
+      <EventDetailPanel
+        event={selectedEvent}
+        onClose={() => setDetailPanelOpen(false)}
+      />
     </div>
   );
 }
