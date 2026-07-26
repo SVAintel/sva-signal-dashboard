@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
@@ -30,7 +29,6 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -110,14 +108,6 @@ export default function Dashboard() {
             >
               [SWITCH]
             </button>
-            <span className="text-slate-700">•</span>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-slate-600 hover:text-cyan-400 transition"
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            >
-              {sidebarOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-            </button>
           </div>
 
           <div className="text-[10px] text-slate-600">
@@ -128,30 +118,8 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Map */}
-        <div className="relative flex-1 border-r border-[#1e3a5f]">
-          {/* Map legend */}
-          <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-2 text-[10px] backdrop-blur">
-            {Object.entries(categoryLabels).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 py-0.5">
-                <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
-                <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Event count badge */}
-          <div className="absolute right-4 top-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-1 text-[10px] backdrop-blur">
-            <span className="font-bold text-cyan-400">{events.length}</span>
-            <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
-          </div>
-
-          <WorldMap events={events} selectedEvent={selectedEvent} />
-        </div>
-
-        {/* Sidebar with Tabs */}
-        {sidebarOpen && (
-        <div className="w-[420px] flex flex-col bg-[#080d1a] border-l border-[#1e3a5f]">
+        {/* Sidebar with Tabs - on LEFT */}
+        <div className="w-[420px] flex flex-col bg-[#080d1a] border-r border-[#1e3a5f]">
           {/* Tab Buttons */}
           <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
             {(["events", "news", "stocks"] as SidebarTab[]).map((tab) => (
@@ -185,7 +153,27 @@ export default function Dashboard() {
             {activeTab === "stocks" && <StockMarketPanel />}
           </div>
         </div>
-        )}
+
+        {/* Map - on RIGHT, fills remaining space */}
+        <div className="relative flex-1">
+          {/* Map legend */}
+          <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-2 text-[10px] backdrop-blur">
+            {Object.entries(categoryLabels).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 py-0.5">
+                <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
+                <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Event count badge */}
+          <div className="absolute right-4 top-4 z-[999] rounded border border-[#1e3a5f] bg-[#080d1acc] px-3 py-1 text-[10px] backdrop-blur">
+            <span className="font-bold text-cyan-400">{events.length}</span>
+            <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
+          </div>
+
+          <WorldMap events={events} selectedEvent={selectedEvent} />
+        </div>
       </div>
 
       {/* Event Detail Modal */}
