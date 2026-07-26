@@ -1,9 +1,10 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
+import { useEffect } from "react";
 
 const makeIcon = (color: string) =>
   new L.DivIcon({
@@ -22,6 +23,14 @@ const icons: Record<string, L.DivIcon> = {
 
 const worldBounds = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
 
+function MapFitter() {
+  const map = useMap();
+  useEffect(() => {
+    map.fitBounds(worldBounds, { padding: [0, 0] });
+  }, [map]);
+  return null;
+}
+
 export default function WorldMap({
   events,
   selectedEvent,
@@ -33,13 +42,14 @@ export default function WorldMap({
     <MapContainer
       center={[20, 0]}
       zoom={2}
-      minZoom={2}
+      minZoom={1}
       maxZoom={8}
       maxBounds={worldBounds}
       maxBoundsViscosity={1.0}
       style={{ height: "100%", width: "100%", background: "#0a0f1e" }}
       zoomControl={false}
     >
+      <MapFitter />
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
