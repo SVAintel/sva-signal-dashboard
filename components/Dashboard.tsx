@@ -13,17 +13,17 @@ import axios from "axios";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 
-const categoryLabels: Record<string, { label: string; color: string }> = {
-  war: { label: "WAR", color: "#ef4444" },
-  counter_terrorism: { label: "CT", color: "#a855f7" },
-  natural_disaster: { label: "GEO", color: "#f59e0b" },
-  market: { label: "MKT", color: "#22d3ee" },
-  biological: { label: "BIO", color: "#22c55e" },
-  political_unrest: { label: "POL", color: "#f97316" },
-  cyber: { label: "CYB", color: "#06b6d4" },
-  nuclear: { label: "NUC", color: "#84cc16" },
-  energy: { label: "NRG", color: "#d97706" },
-  humanitarian: { label: "HUM", color: "#f43f5e" },
+const categoryLabels: Record<string, { label: string; color: string; tooltip: string }> = {
+  war: { label: "WAR", color: "#ef4444", tooltip: "WAR — Armed Conflict & Military Operations" },
+  counter_terrorism: { label: "CT", color: "#a855f7", tooltip: "CT — Counter-Terrorism" },
+  natural_disaster: { label: "GEO", color: "#f59e0b", tooltip: "GEO — Geophysical & Natural Disasters" },
+  market: { label: "MKT", color: "#22d3ee", tooltip: "MKT — Financial Markets & Economic Events" },
+  biological: { label: "BIO", color: "#22c55e", tooltip: "BIO — Biological Threats & Outbreaks" },
+  political_unrest: { label: "POL", color: "#f97316", tooltip: "POL — Political Unrest & Civil Instability" },
+  cyber: { label: "CYB", color: "#06b6d4", tooltip: "CYB — Cyber Attacks & Digital Threats" },
+  nuclear: { label: "NUC", color: "#84cc16", tooltip: "NUC — Nuclear & Radiological Activity" },
+  energy: { label: "NRG", color: "#d97706", tooltip: "NRG — Energy Infrastructure & Supply" },
+  humanitarian: { label: "HUM", color: "#f43f5e", tooltip: "HUM — Humanitarian Crises & Displacement" },
 };
 
 type SidebarTab = "events" | "news" | "stocks";
@@ -105,6 +105,7 @@ export default function Dashboard() {
               <button
                 key={cat}
                 onClick={() => toggleCategory(cat)}
+                title={meta.tooltip}
                 style={isOn ? { borderColor: meta.color, color: meta.color } : {}}
                 className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
                   isOn ? "bg-[#0f172a]" : "border-slate-700 text-slate-400 opacity-40 hover:opacity-70"
