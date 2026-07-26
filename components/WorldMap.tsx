@@ -19,6 +19,12 @@ const icons: Record<string, L.DivIcon> = {
   counter_terrorism: makeIcon("#a855f7"),
   natural_disaster: makeIcon("#f59e0b"),
   market: makeIcon("#22d3ee"),
+  biological: makeIcon("#22c55e"),
+  political_unrest: makeIcon("#f97316"),
+  cyber: makeIcon("#06b6d4"),
+  nuclear: makeIcon("#84cc16"),
+  energy: makeIcon("#d97706"),
+  humanitarian: makeIcon("#f43f5e"),
 };
 
 const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));

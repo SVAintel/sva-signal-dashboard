@@ -7,6 +7,12 @@ const categoryMeta: Record<string, { label: string; color: string; bg: string }>
   counter_terrorism: { label: "C-TER",   color: "#a855f7", bg: "#130a1a" },
   natural_disaster:  { label: "GEO",     color: "#f59e0b", bg: "#1a120a" },
   market:            { label: "MARKET",  color: "#22d3ee", bg: "#0a141a" },
+  biological:        { label: "BIO",     color: "#22c55e", bg: "#0a1a0f" },
+  political_unrest:  { label: "POL",     color: "#f97316", bg: "#1a0f0a" },
+  cyber:             { label: "CYB",     color: "#06b6d4", bg: "#0a1419" },
+  nuclear:           { label: "NUC",     color: "#84cc16", bg: "#111a0a" },
+  energy:            { label: "NRG",     color: "#d97706", bg: "#1a1200" },
+  humanitarian:      { label: "HUM",     color: "#f43f5e", bg: "#1a0a0e" },
 };
 
 const confidenceDot: Record<string, string> = {

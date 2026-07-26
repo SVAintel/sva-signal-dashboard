@@ -112,6 +112,12 @@ function getCategoryColor(category: string): string {
     counter_terrorism: "#a855f7",
     natural_disaster: "#f59e0b",
     market: "#22d3ee",
+    biological: "#22c55e",
+    political_unrest: "#f97316",
+    cyber: "#06b6d4",
+    nuclear: "#84cc16",
+    energy: "#d97706",
+    humanitarian: "#f43f5e",
   };
   return colors[category] || "#64748b";
 }
@@ -210,6 +216,120 @@ function generateAnalystNotes(event: Event): AnalystNotesResult {
       additionalSources: [
         { name: "CoinGecko", title: "Crypto Market Data", url: "https://coingecko.com" },
         { name: "Finnhub", title: "Financial Data", url: "https://finnhub.io" },
+      ],
+    },
+    biological: {
+      paragraphs: [
+        `Outbreak detection signals observed at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Epidemiological patterns suggest sustained community transmission with R-value above threshold. Pathogen characteristics and case clustering indicate potential for rapid geographic spread. WHO surveillance protocols activated; early intervention window is critical. Cross-reference with travel data and port-of-entry screening.`,
+        `Transmission risk assessment underway. Immediate priority: contact tracing network activation and healthcare capacity pre-positioning. Monitor mutation reports for virulence shifts. Coordinate with national health ministries and international health partners. Key parameters: case doubling time, healthcare utilization rates, geographic spread velocity, and genomic sequencing data. Activate biosurveillance sharing with allied health agencies.`,
+      ],
+      watchPoints: [
+        "Containment measures and border health controls",
+        "WHO emergency committee convening",
+        "Travel restriction announcements",
+        "Mutation and variant sequencing reports",
+        "Healthcare system capacity indicators",
+        "Vaccine and countermeasure stockpile status",
+      ],
+      sourceUrl: "https://www.who.int",
+      additionalSources: [
+        { name: "WHO", title: "World Health Organization", url: "https://who.int" },
+        { name: "CDC", title: "Centers for Disease Control", url: "https://cdc.gov" },
+      ],
+    },
+    political_unrest: {
+      paragraphs: [
+        `Destabilization indicators detected at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Opposition momentum building with coordinated network activation across multiple civic channels. Regime vulnerability assessment elevated based on economic grievance index, historical analogs, and social media amplification signals. Security forces on elevated alert; international observers monitoring situation.`,
+        `Pattern analysis indicates 14-21 day escalation window before consolidation or collapse. Foreign embassy posture changes are key leading indicators. Monitor for security force defections as tipping-point signal. Coordinate with diplomatic missions and regional partners. Key parameters: crowd size trajectory, government counter-messaging, economic trigger events, and external power positioning. Brief policy leadership within 4 hours.`,
+      ],
+      watchPoints: [
+        "Security force defections or loyalty shifts",
+        "International recognition and diplomatic signals",
+        "Foreign embassy security posture changes",
+        "Social media amplification and coordination",
+        "Economic triggers and currency movements",
+        "Armed group mobilization indicators",
+      ],
+      sourceUrl: "https://www.reuters.com",
+      additionalSources: [
+        { name: "Reuters", title: "Global News Feed", url: "https://reuters.com" },
+        { name: "Foreign Policy", title: "Geopolitical Analysis", url: "https://foreignpolicy.com" },
+      ],
+    },
+    cyber: {
+      paragraphs: [
+        `Cyberattack vector analysis indicates advanced persistent threat (APT) activity with attribution indicators matching known state-sponsored or criminal group TTPs. Attack signature correlates with prior campaigns; lateral movement patterns suggest pre-positioned access. Infrastructure vulnerability confirmed across multiple nodes. Incident response protocols activated; forensic collection underway.`,
+        `Secondary target assessment in progress — pivot indicators suggest broader campaign scope. Monitor for data exfiltration signals and C2 beacon activity. Coordinate with CISA, sector ISACs, and international cyber partners. Key parameters: affected system inventory, patch release timelines, attribution confidence level, and diplomatic escalation thresholds. Brief CISO and executive leadership immediately. Prepare public disclosure timeline.`,
+      ],
+      watchPoints: [
+        "Secondary target identification and lateral movement",
+        "Data exfiltration volume and destination indicators",
+        "Official attribution statements from governments",
+        "Patch and vulnerability disclosure releases",
+        "C2 infrastructure takedown operations",
+        "Sector-wide alert and ISAC notifications",
+      ],
+      sourceUrl: "https://www.cisa.gov",
+      additionalSources: [
+        { name: "CISA", title: "Cybersecurity & Infrastructure Security", url: "https://cisa.gov" },
+        { name: "Threat Intel", title: "APT Tracking Feeds", url: "https://attack.mitre.org" },
+      ],
+    },
+    nuclear: {
+      paragraphs: [
+        `Proliferation risk indicators elevated at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Enrichment activity detected above civilian threshold based on open-source technical indicators. IAEA monitoring protocols activated; satellite imagery analysis indicates facility configuration changes consistent with weapons-development timeline. Delivery system capability assessment underway.`,
+        `Diplomatic channel activity is the primary de-escalation pathway. Monitor dual-use technology transfer patterns and procurement networks. Coordinate with IAEA verification teams and P5+1 diplomatic frameworks. Key parameters: enrichment level percentage, centrifuge cascade count, warhead miniaturization indicators, and delivery vehicle range assessment. Brief national security council within 2 hours. Prepare sanctions escalation options.`,
+      ],
+      watchPoints: [
+        "IAEA inspector access and compliance status",
+        "Satellite imagery changes at known facilities",
+        "Diplomatic channel communications",
+        "Dual-use technology transfer detections",
+        "Delivery system test and development indicators",
+        "Financial sanctions evasion patterns",
+      ],
+      sourceUrl: "https://www.iaea.org",
+      additionalSources: [
+        { name: "IAEA", title: "International Atomic Energy Agency", url: "https://iaea.org" },
+        { name: "NTI", title: "Nuclear Threat Initiative", url: "https://nti.org" },
+      ],
+    },
+    energy: {
+      paragraphs: [
+        `Supply chain disruption detected with cascading market effects confirmed. Geopolitical leverage play identified — state actor using energy infrastructure as coercive instrument. Pipeline integrity and flow rate anomalies detected across key transit corridors. Strategic reserve drawdown initiated by affected governments; commodity derivative markets pricing in sustained disruption.`,
+        `Alternative supply route viability assessment underway. Monitor diplomatic negotiations for resolution timeline indicators. Coordinate with IEA emergency response mechanisms and allied energy ministries. Key parameters: strategic reserve days-of-supply, LNG spot market availability, alternative pipeline capacity, and political resolution probability. Brief energy security leadership and treasury within 1 hour. Prepare emergency supply sharing protocol activation.`,
+      ],
+      watchPoints: [
+        "Strategic reserve levels and drawdown rate",
+        "Alternative supply route activation",
+        "Diplomatic negotiation progress signals",
+        "Market derivative and futures positioning",
+        "Critical infrastructure physical security status",
+        "Downstream industrial and civilian impact indicators",
+      ],
+      sourceUrl: "https://www.iea.org",
+      additionalSources: [
+        { name: "IEA", title: "International Energy Agency", url: "https://iea.org" },
+        { name: "EIA", title: "Energy Information Administration", url: "https://eia.gov" },
+      ],
+    },
+    humanitarian: {
+      paragraphs: [
+        `Displacement patterns confirmed at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). IDP movement tracking indicates accelerating civilian exodus from conflict or disaster zone. Aid access constraints imposed by armed actors or infrastructure collapse. Civilian protection status degraded; international humanitarian law compliance indicators negative. IDP camp capacity approaching critical threshold.`,
+        `Aid corridor access compromise requires immediate diplomatic escalation. Coordinate with UNHCR, WFP, OCHA, and bilateral humanitarian partners. Food security index deteriorating; pre-famine indicators present in affected population segments. Key parameters: IDP camp capacity utilization, food security phase classification, medical supply chain status, and international tribunal referral status. Brief humanitarian affairs leadership and donor governments within 6 hours.`,
+      ],
+      watchPoints: [
+        "IDP camp capacity and population flow rates",
+        "Food security phase classification changes",
+        "Aid corridor access and armed actor compliance",
+        "International tribunal and accountability actions",
+        "Donor government response and funding pledges",
+        "Disease outbreak risk in displaced populations",
+      ],
+      sourceUrl: "https://www.unhcr.org",
+      additionalSources: [
+        { name: "UNHCR", title: "UN Refugee Agency", url: "https://unhcr.org" },
+        { name: "OCHA", title: "UN Office for Coordination of Humanitarian Affairs", url: "https://unocha.org" },
       ],
     },
   };

@@ -18,6 +18,12 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
   counter_terrorism: { label: "CT", color: "#a855f7" },
   natural_disaster: { label: "GEO", color: "#f59e0b" },
   market: { label: "MKT", color: "#22d3ee" },
+  biological: { label: "BIO", color: "#22c55e" },
+  political_unrest: { label: "POL", color: "#f97316" },
+  cyber: { label: "CYB", color: "#06b6d4" },
+  nuclear: { label: "NUC", color: "#84cc16" },
+  energy: { label: "NRG", color: "#d97706" },
+  humanitarian: { label: "HUM", color: "#f43f5e" },
 };
 
 type SidebarTab = "events" | "news" | "stocks";
@@ -51,7 +57,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [userProfile, selectedCategory]);
 
-  const categories = ["all", "war", "counter_terrorism", "natural_disaster", "market"];
+  const categories = ["all", "war", "counter_terrorism", "natural_disaster", "market", "biological", "political_unrest", "cyber", "nuclear", "energy", "humanitarian"];
 
   const handleEventSelect = (event: Event | null) => {
     setSelectedEvent(event);
@@ -80,7 +86,7 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-6">
           {/* Category filters */}
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {categories.map((cat) => {
               const meta = cat !== "all" ? categoryLabels[cat] : null;
               const active = (selectedCategory ?? "all") === cat;

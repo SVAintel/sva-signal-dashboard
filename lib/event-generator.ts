@@ -63,48 +63,71 @@ function getFallbackEvents(): Event[] {
   ];
 }
 
-// NewsAPI - geopolitical events (with timeout)
+// NewsAPI - broad geopolitical/threat events with smart categorization
 async function fetchNewsAPIEvents() {
   if (!NEWS_API_KEY) return [];
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const keywords = ["military", "war", "conflict", "terrorist", "geopolitical"];
-    const keyword = keywords[Math.floor(Math.random() * keywords.length)];
-    
     const res = await fetch(
-      `https://newsapi.org/v2/everything?q=${keyword}&sortBy=publishedAt&language=en&pageSize=10&apiKey=${NEWS_API_KEY}`,
+      `https://newsapi.org/v2/everything?q=war+OR+conflict+OR+outbreak+OR+cyberattack+OR+nuclear+OR+protest+OR+energy+OR+refugee&sortBy=publishedAt&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
       { signal: controller.signal }
     );
     clearTimeout(timeout);
-    
+
     const data = await res.json();
-    
+
     // Filter out irrelevant articles (entertainment, sports, tech reviews, etc.)
     const excludeKeywords = [
-      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", 
-      "actor", "celebrity", "oscars", "concert", "music", "sports", 
+      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film",
+      "actor", "celebrity", "oscars", "concert", "music", "sports",
       "game", "video game", "esports", "football", "basketball",
       "entertainment", "streaming", "sequel", "tv show", "series"
     ];
-    
+
     const isRelevant = (title: string, description: string) => {
       const text = (title + " " + description).toLowerCase();
       return !excludeKeywords.some(kw => text.includes(kw));
     };
-    
+
+    const categorize = (title: string, description: string): string => {
+      const text = (title + " " + description).toLowerCase();
+      if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "who ", "epidemic", "plague", "infection"].some(kw => text.includes(kw)))
+        return "biological";
+      if (["protest", "coup", "uprising", "riot", "civil unrest", "election fraud", "demonstrations", "political crisis", "impeach", "overthrow"].some(kw => text.includes(kw)))
+        return "political_unrest";
+      if (["cyberattack", "ransomware", "hacking", "data breach", "malware", "phishing", "cyber", "infrastructure attack"].some(kw => text.includes(kw)))
+        return "cyber";
+      if (["nuclear", "radiation", "iaea", "proliferation", "uranium", "warhead", "reactor accident", "dirty bomb"].some(kw => text.includes(kw)))
+        return "nuclear";
+      if (["energy crisis", "pipeline", "oil sanction", "gas supply", "energy security", "blackout", "power grid"].some(kw => text.includes(kw)))
+        return "energy";
+      if (["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"].some(kw => text.includes(kw)))
+        return "humanitarian";
+      if (["terror", "isis", "al-qaeda", "bombing", "jihad"].some(kw => text.includes(kw)))
+        return "counter_terrorism";
+      return "war";
+    };
+
+    const categoryCounts: Record<string, number> = {};
+
     return (data.articles || [])
       .filter((article: any) => isRelevant(article.title, article.description || ""))
-      .slice(0, 3)
-      .map((article: any) => ({
-        title: article.title,
-        description: article.description || article.content || "Breaking news",
-        location: { lat: 20 + Math.random() * 40, lng: -30 + Math.random() * 120 },
-        source: "NewsAPI",
-        category: keyword.includes("terror") ? "counter_terrorism" : "war",
-        timestamp: new Date(article.publishedAt).toISOString(),
-      }));
+      .reduce((acc: any[], article: any) => {
+        const category = categorize(article.title, article.description || "");
+        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+        if (categoryCounts[category] > 2) return acc; // max 2 per category
+        acc.push({
+          title: article.title,
+          description: article.description || article.content || "Breaking news",
+          location: { lat: 20 + Math.random() * 40, lng: -30 + Math.random() * 120 },
+          source: "NewsAPI",
+          category,
+          timestamp: new Date(article.publishedAt).toISOString(),
+        });
+        return acc;
+      }, []);
   } catch (e) {
     console.error("NewsAPI error:", e);
     return [];
@@ -320,13 +343,43 @@ const knownKnownsMap: Record<string, string[]> = {
     "Sector rotation follows historical patterns",
     "Technical indicators confirm trend shift",
   ],
+  biological: [
+    "Pathogen transmission vectors identified",
+    "Epidemiological modeling underway",
+    "WHO surveillance activated",
+  ],
+  political_unrest: [
+    "Opposition coordination networks active",
+    "Historical precedent for regime change",
+    "Security forces on elevated alert",
+  ],
+  cyber: [
+    "Attack signature matches known APT group",
+    "Infrastructure vulnerability confirmed",
+    "Lateral movement indicators detected",
+  ],
+  nuclear: [
+    "Enrichment activity above threshold",
+    "IAEA monitoring protocols activated",
+    "Delivery system capability assessment underway",
+  ],
+  energy: [
+    "Supply disruption cascading through markets",
+    "Strategic reserve drawdown initiated",
+    "Geopolitical leverage play confirmed",
+  ],
+  humanitarian: [
+    "IDP movement patterns tracked",
+    "Aid corridor access compromised",
+    "International response coordination active",
+  ],
 };
 
 export function filterByProfile(events: Event[], profile: string): Event[] {
   const profileCategoryMap: Record<string, string[]> = {
-    osint: ["war", "counter_terrorism", "natural_disaster"],
-    finance: ["market", "natural_disaster"],
-    military: ["war", "counter_terrorism", "natural_disaster"],
+    osint: ["war", "counter_terrorism", "natural_disaster", "biological", "political_unrest", "cyber", "humanitarian"],
+    finance: ["market", "natural_disaster", "energy", "cyber"],
+    military: ["war", "counter_terrorism", "natural_disaster", "biological", "cyber", "nuclear", "energy"],
   };
 
   const allowedCategories = profileCategoryMap[profile] || profileCategoryMap.osint;
