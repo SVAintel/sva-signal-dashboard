@@ -16,9 +16,9 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm" onClick={onClose} />
       
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
         <div className="pointer-events-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded border border-cyan-400/30 bg-[#0a0f1f] shadow-2xl">
           <div className="sticky top-0 flex items-center justify-between border-b border-cyan-400/30 bg-[#080d1a] px-6 py-4">
             <div className="flex-1">
