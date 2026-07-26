@@ -21,12 +21,12 @@ const icons: Record<string, L.DivIcon> = {
   market: makeIcon("#22d3ee"),
 };
 
-const worldBounds = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
+const worldBounds = L.latLngBounds(L.latLng(-90, -180), L.latLng(90, 180));
 
 function MapFitter() {
   const map = useMap();
   useEffect(() => {
-    map.fitBounds(worldBounds, { padding: [0, 0] });
+    map.fitBounds(worldBounds, { padding: [0, 0], maxZoom: 2 });
   }, [map]);
   return null;
 }
