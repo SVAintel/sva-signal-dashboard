@@ -60,7 +60,7 @@ export default function EventList({
           return (
             <button
               key={event.id}
-              onClick={() => onSelectEvent(isSelected ? null : event)}
+              onClick={() => onSelectEvent(event)}
               style={isSelected ? { borderLeftColor: meta.color } : {}}
               className={`w-full border-b border-[#1e3a5f] border-l-2 p-3 text-left transition ${
                 isSelected
@@ -100,23 +100,6 @@ export default function EventList({
                 </span>
               </div>
 
-              {/* Expanded analyst view */}
-              {isSelected && (
-                <div
-                  className="mt-3 space-y-2 border-t pt-3 text-[11px]"
-                  style={{ borderColor: meta.color + "33" }}
-                >
-                  <p className="text-slate-400 leading-relaxed">{event.description}</p>
-                  <div className="space-y-1">
-                    <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: meta.color }}>
-                      Analyst Assessment
-                    </div>
-                    <div className="text-slate-500">
-                      <span className="text-slate-400">▸ </span>{event.aiNotes}
-                    </div>
-                  </div>
-                </div>
-              )}
             </button>
           );
         })}

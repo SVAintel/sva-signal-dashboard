@@ -54,9 +54,12 @@ export default function Dashboard() {
 
   const handleEventSelect = (event: Event | null) => {
     setSelectedEvent(event);
-    if (event) {
-      setDetailPanelOpen(true);
-    }
+    setDetailPanelOpen(!!event);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailPanelOpen(false);
+    setSelectedEvent(null);
   };
 
   return (
@@ -176,7 +179,7 @@ export default function Dashboard() {
       {/* Event Detail Modal */}
       <EventDetailPanel
         event={selectedEvent}
-        onClose={() => setDetailPanelOpen(false)}
+        onClose={handleCloseDetail}
       />
     </div>
   );
