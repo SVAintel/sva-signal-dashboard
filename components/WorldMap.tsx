@@ -21,13 +21,43 @@ const icons: Record<string, L.DivIcon> = {
   market: makeIcon("#22d3ee"),
 };
 
-const worldBounds = L.latLngBounds(L.latLng(-90, -180), L.latLng(90, 180));
+const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));
 
 function MapFitter() {
   const map = useMap();
+
   useEffect(() => {
-    map.fitBounds(worldBounds, { padding: [0, 0], maxZoom: 2 });
+    // Leaflet's world tiles are always square (Web Mercator): worldWidth = worldHeight = 256 * 2^zoom.
+    // fitBounds "contains" the whole square, which letterboxes when the container is wider than tall
+    // (our case, since the sidebar makes the map panel landscape). Instead, compute zoom so the
+    // world's width exactly matches the container's width — this crops slightly near the poles
+    // (empty ocean/ice, no data there) but eliminates the side bars entirely.
+    let isFirstRun = true;
+
+    const fitToContainerWidth = () => {
+      const size = map.getSize();
+      if (size.x === 0 || size.y === 0) return;
+      const zoom = Math.log2(size.x / 256);
+      map.setMinZoom(zoom);
+
+      if (isFirstRun) {
+        map.setView([0, 0], zoom, { animate: false });
+        isFirstRun = false;
+      } else if (map.getZoom() < zoom) {
+        map.setZoom(zoom, { animate: false });
+      }
+    };
+
+    fitToContainerWidth();
+    map.on("resize", fitToContainerWidth);
+    window.addEventListener("resize", fitToContainerWidth);
+
+    return () => {
+      map.off("resize", fitToContainerWidth);
+      window.removeEventListener("resize", fitToContainerWidth);
+    };
   }, [map]);
+
   return null;
 }
 
