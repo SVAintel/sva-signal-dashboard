@@ -144,8 +144,8 @@ export default function Dashboard() {
           <div className="flex-1 overflow-hidden flex flex-col">
             {activeTab === "events" && (
               <>
-                {/* Signals scrollbox - fixed height for ~6-8 items */}
-                <div className="h-[360px] shrink-0 overflow-y-auto border-b border-[#1e3a5f]">
+                {/* Signals — fills remaining space, scrollable */}
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   <EventList
                     events={events}
                     loading={loading}
@@ -153,8 +153,8 @@ export default function Dashboard() {
                     selectedEvent={selectedEvent}
                   />
                 </div>
-                {/* Live feed below */}
-                <div className="flex-1 overflow-hidden">
+                {/* Live feed — natural height (16:9 video + controls), no black bars */}
+                <div className="shrink-0">
                   <LiveBroadcasts />
                 </div>
               </>

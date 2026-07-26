@@ -62,7 +62,7 @@ export default function LiveBroadcasts() {
   const current = channels[active];
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col border-t border-[#1e3a5f]">
       {/* Channel selector */}
       <div className="border-b border-[#1e3a5f] px-4 py-2">
         <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -92,8 +92,8 @@ export default function LiveBroadcasts() {
         </div>
       </div>
 
-      {/* Embed or unavailable */}
-      <div className="flex-1 bg-black">
+      {/* Embed or unavailable — 16:9 aspect ratio, no black bars */}
+      <div className="w-full bg-black" style={{ aspectRatio: "16/9" }}>
         {current?.videoId ? (
           <iframe
             key={current.videoId}
