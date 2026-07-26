@@ -7,7 +7,7 @@ import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
 import LiveBroadcasts from "./LiveBroadcasts";
 import EventDetailPanel from "./EventDetailPanel";
-import { useStore } from "@/store/useStore";
+import { useStore, ALL_CATEGORIES } from "@/store/useStore";
 import { Event } from "@/lib/types";
 import axios from "axios";
 
@@ -29,8 +29,8 @@ const categoryLabels: Record<string, { label: string; color: string }> = {
 type SidebarTab = "events" | "news" | "stocks";
 
 export default function Dashboard() {
-  const { userProfile, selectedCategory, setSelectedCategory, setUserProfile } = useStore();
-  const [events, setEvents] = useState<Event[]>([]);
+  const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
+  const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
@@ -40,10 +40,8 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const res = await axios.get("/api/events", {
-          params: { profile: userProfile, category: selectedCategory },
-        });
-        setEvents(res.data);
+        const res = await axios.get("/api/events");
+        setAllEvents(res.data);
         setLastUpdated(new Date().toUTCString().replace("GMT", "Z"));
       } catch (error) {
         console.error("Failed to fetch events:", error);
@@ -55,9 +53,12 @@ export default function Dashboard() {
     fetchEvents();
     const interval = setInterval(fetchEvents, 1800000); // 30 minutes
     return () => clearInterval(interval);
-  }, [userProfile, selectedCategory]);
+  }, []);
 
-  const categories = ["all", "war", "counter_terrorism", "natural_disaster", "market", "biological", "political_unrest", "cyber", "nuclear", "energy", "humanitarian"];
+  // Client-side filter by active categories
+  const events = allEvents.filter((e) => activeCategories.includes(e.category));
+
+  const allOn = activeCategories.length === ALL_CATEGORIES.length;
 
   const handleEventSelect = (event: Event | null) => {
     setSelectedEvent(event);
@@ -84,42 +85,38 @@ export default function Dashboard() {
           </span>
         </div>
 
-        <div className="flex items-center gap-6">
-          {/* Category filters */}
-          <div className="flex flex-wrap gap-1">
-            {categories.map((cat) => {
-              const meta = cat !== "all" ? categoryLabels[cat] : null;
-              const active = (selectedCategory ?? "all") === cat;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat === "all" ? null : cat)}
-                  style={active && meta ? { borderColor: meta.color, color: meta.color } : {}}
-                  className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
-                    active
-                      ? "bg-[#0f172a]"
-                      : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {cat === "all" ? "ALL" : categoryLabels[cat].label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-3 text-[10px] text-slate-500">
-            <span>PROFILE: <span className="text-cyan-400 font-bold">{userProfile?.toUpperCase()}</span></span>
-            <button
-              onClick={() => setUserProfile(null)}
-              className="text-slate-600 hover:text-slate-400 transition"
-            >
-              [SWITCH]
-            </button>
-          </div>
-
-          <div className="text-[10px] text-slate-600">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* ALL toggle */}
+          <button
+            onClick={() => setAllCategories(allOn ? [] : ALL_CATEGORIES)}
+            className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
+              allOn
+                ? "border-cyan-400 text-cyan-400 bg-[#0f172a]"
+                : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+            }`}
+          >
+            ALL
+          </button>
+          {/* Per-category toggles */}
+          {ALL_CATEGORIES.map((cat) => {
+            const meta = categoryLabels[cat];
+            const isOn = activeCategories.includes(cat);
+            return (
+              <button
+                key={cat}
+                onClick={() => toggleCategory(cat)}
+                style={isOn ? { borderColor: meta.color, color: meta.color } : {}}
+                className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
+                  isOn ? "bg-[#0f172a]" : "border-slate-700 text-slate-400 opacity-40 hover:opacity-70"
+                }`}
+              >
+                {meta.label}
+              </button>
+            );
+          })}
+          <span className="text-[10px] text-slate-600 whitespace-nowrap ml-2">
             UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
-          </div>
+          </span>
         </div>
       </header>
 

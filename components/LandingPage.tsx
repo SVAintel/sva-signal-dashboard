@@ -68,7 +68,7 @@ export default function LandingPage() {
         {/* Bottom detail text */}
         <div className="mt-16 space-y-2 text-[10px] text-slate-600 uppercase tracking-wider">
           <p>Data Sources: NewsAPI • Alpha Vantage • USGS • GDELT • ACLED • CoinGecko • EMSC</p>
-          <p>Updating: Real-time • Profiles: OSINT • Finance • Military</p>
+          <p>Updating: Real-time • Categories: Conflict • Cyber • Biological • Political • Energy • Humanitarian</p>
         </div>
       </div>
 
