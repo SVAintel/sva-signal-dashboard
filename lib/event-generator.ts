@@ -70,25 +70,41 @@ async function fetchNewsAPIEvents() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const keywords = ["military", "war", "conflict", "terrorist"];
+    const keywords = ["military", "war", "conflict", "terrorist", "geopolitical"];
     const keyword = keywords[Math.floor(Math.random() * keywords.length)];
     
     const res = await fetch(
-      `https://newsapi.org/v2/everything?q=${keyword}&sortBy=publishedAt&language=en&pageSize=3&apiKey=${NEWS_API_KEY}`,
+      `https://newsapi.org/v2/everything?q=${keyword}&sortBy=publishedAt&language=en&pageSize=10&apiKey=${NEWS_API_KEY}`,
       { signal: controller.signal }
     );
     clearTimeout(timeout);
     
     const data = await res.json();
     
-    return (data.articles || []).slice(0, 3).map((article: any) => ({
-      title: article.title,
-      description: article.description || article.content || "Breaking news",
-      location: { lat: 20 + Math.random() * 40, lng: -30 + Math.random() * 120 },
-      source: "NewsAPI",
-      category: keyword.includes("terror") ? "counter_terrorism" : "war",
-      timestamp: new Date(article.publishedAt).toISOString(),
-    }));
+    // Filter out irrelevant articles (entertainment, sports, tech reviews, etc.)
+    const excludeKeywords = [
+      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", 
+      "actor", "celebrity", "oscars", "concert", "music", "sports", 
+      "game", "video game", "esports", "football", "basketball",
+      "entertainment", "streaming", "sequel", "tv show", "series"
+    ];
+    
+    const isRelevant = (title: string, description: string) => {
+      const text = (title + " " + description).toLowerCase();
+      return !excludeKeywords.some(kw => text.includes(kw));
+    };
+    
+    return (data.articles || [])
+      .filter((article: any) => isRelevant(article.title, article.description || ""))
+      .slice(0, 3)
+      .map((article: any) => ({
+        title: article.title,
+        description: article.description || article.content || "Breaking news",
+        location: { lat: 20 + Math.random() * 40, lng: -30 + Math.random() * 120 },
+        source: "NewsAPI",
+        category: keyword.includes("terror") ? "counter_terrorism" : "war",
+        timestamp: new Date(article.publishedAt).toISOString(),
+      }));
   } catch (e) {
     console.error("NewsAPI error:", e);
     return [];
