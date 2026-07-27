@@ -110,7 +110,7 @@ interface MapLayerData {
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
 }
 
-function MapFitter() {
+function MapFitter({ visible = true }: { visible?: boolean }) {
   const map = useMap();
 
   useEffect(() => {
@@ -145,6 +145,22 @@ function MapFitter() {
     };
   }, [map]);
 
+  // On mobile the map container toggles display:none/block via the view switcher.
+  // Leaflet measures 0x0 while hidden, so force a re-measure + refit once it reappears.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      map.invalidateSize();
+      const size = map.getSize();
+      if (size.x > 0 && size.y > 0) {
+        const zoom = Math.log2(size.x / 256);
+        map.setMinZoom(zoom);
+        if (map.getZoom() < zoom) map.setZoom(zoom, { animate: false });
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible, map]);
+
   return null;
 }
 
@@ -155,6 +171,7 @@ export default function WorldMap({
   activeLayers,
   layerData,
   onSelectConflictZone,
+  mobileVisible = true,
 }: {
   events: Event[];
   selectedEvent: Event | null;
@@ -162,6 +179,7 @@ export default function WorldMap({
   activeLayers: MapLayers;
   layerData: MapLayerData | null;
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
+  mobileVisible?: boolean;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
@@ -178,7 +196,7 @@ export default function WorldMap({
       style={{ height: "100%", width: "100%", background: "#040906" }}
       zoomControl={false}
     >
-      <MapFitter />
+      <MapFitter visible={mobileVisible} />
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'

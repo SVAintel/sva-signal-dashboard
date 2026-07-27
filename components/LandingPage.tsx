@@ -31,7 +31,7 @@ export default function LandingPage() {
         </div>
 
         {/* Main Title */}
-        <h1 className="mb-4 text-5xl font-bold tracking-tight text-slate-100">
+        <h1 className="mb-4 text-4xl font-bold tracking-tight text-slate-100 sm:text-5xl">
           Sovereign Veil
           <br />
           <span className="bg-gradient-to-r from-[#d4b36a] to-[#1f5a40] bg-clip-text text-transparent">
