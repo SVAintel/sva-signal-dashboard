@@ -165,37 +165,73 @@ function getFallbackEvents(): Event[] {
   ];
 }
 
-// NewsAPI - broad geopolitical/threat events with smart categorization
+// NewsAPI - breaking news for live geopolitical/threat events
 async function fetchNewsAPIEvents() {
   if (!NEWS_API_KEY) return [];
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(
-      `https://newsapi.org/v2/everything?q=war+OR+conflict+OR+outbreak+OR+cyberattack+OR+nuclear+OR+protest+OR+energy+OR+refugee&sortBy=publishedAt&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
-      { signal: controller.signal }
-    );
+    // top-headlines with category=general gives breaking news, not editorials
+    // We fetch two passes: world headlines + specific threat keywords
+    const [headlinesRes, everythingRes] = await Promise.all([
+      fetch(
+        `https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
+        { signal: controller.signal }
+      ),
+      fetch(
+        `https://newsapi.org/v2/everything?q=attack+OR+airstrike+OR+missile+OR+shooting+OR+explosion+OR+troops+OR+outbreak+OR+cyberattack+OR+nuclear+OR+coup+OR+arrested+OR+sanctions&sortBy=publishedAt&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
+        { signal: controller.signal }
+      ),
+    ]);
     clearTimeout(timeout);
 
-    const data = await res.json();
+    const [h, e] = await Promise.all([headlinesRes.json(), everythingRes.json()]);
+    const combined: any[] = [...(h.articles || []), ...(e.articles || [])];
 
-    // Filter out irrelevant articles (entertainment, sports, tech reviews, etc.)
+    // Deduplicate by title
+    const seen = new Set<string>();
+    const unique = combined.filter(a => {
+      const key = a.title?.slice(0, 60);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Hard exclude: editorials, opinions, reviews, entertainment, sports
     const excludeKeywords = [
-      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film",
-      "actor", "celebrity", "oscars", "concert", "music", "sports",
-      "game", "video game", "esports", "football", "basketball",
-      "entertainment", "streaming", "sequel", "tv show", "series"
+      "opinion", "editorial", "analysis:", "commentary", "column:", "review",
+      "how to", "tips for", "best of", "ranked:", "why you", "what you need",
+      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", "box office",
+      "actor", "celebrity", "oscars", "concert", "music chart", "sports",
+      "video game", "esports", "nfl", "nba", "mlb", "fifa", "premier league",
+      "entertainment", "streaming", "sequel", "tv show", "reality show",
+      "recipe", "fashion", "beauty", "horoscope", "crossword",
     ];
 
-    const isRelevant = (title: string, description: string) => {
-      const text = (title + " " + description).toLowerCase();
-      return !excludeKeywords.some(kw => text.includes(kw));
+    // Require at least one hard news signal word in title or description
+    const breakingSignals = [
+      "killed", "dead", "attack", "airstrike", "missile", "bomb", "explosion",
+      "troops", "invasion", "seized", "arrest", "detained", "sanction", "strike",
+      "outbreak", "virus", "pandemic", "epidemic", "contamination",
+      "cyberattack", "hack", "breach", "ransomware",
+      "nuclear", "radiation", "warhead", "reactor",
+      "protest", "riot", "coup", "unrest", "demonstration",
+      "refugee", "displaced", "famine", "humanitarian crisis",
+      "pipeline", "blackout", "power grid", "energy crisis",
+      "breaking", "urgent", "developing", "update:", "latest:",
+      "fires on", "clashes", "offensive", "ceasefire", "escalat",
+    ];
+
+    const isBreakingNews = (title: string, desc: string) => {
+      const text = (title + " " + desc).toLowerCase();
+      if (excludeKeywords.some(kw => text.includes(kw))) return false;
+      return breakingSignals.some(kw => text.includes(kw));
     };
 
     const categorize = (title: string, description: string): string => {
       const text = (title + " " + description).toLowerCase();
-      if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "who ", "epidemic", "plague", "infection"].some(kw => text.includes(kw)))
+      if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "epidemic", "plague", "infection", "contamination"].some(kw => text.includes(kw)))
         return "biological";
       if (["protest", "coup", "uprising", "riot", "civil unrest", "election fraud", "demonstrations", "political crisis", "impeach", "overthrow"].some(kw => text.includes(kw)))
         return "political_unrest";
@@ -207,24 +243,24 @@ async function fetchNewsAPIEvents() {
         return "energy";
       if (["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"].some(kw => text.includes(kw)))
         return "humanitarian";
-      if (["terror", "isis", "al-qaeda", "bombing", "jihad"].some(kw => text.includes(kw)))
+      if (["terror", "isis", "al-qaeda", "bombing", "jihad", "extremist"].some(kw => text.includes(kw)))
         return "counter_terrorism";
       return "war";
     };
 
     const categoryCounts: Record<string, number> = {};
 
-    return (data.articles || [])
-      .filter((article: any) => isRelevant(article.title, article.description || ""))
+    return unique
+      .filter((article: any) => isBreakingNews(article.title || "", article.description || ""))
       .reduce((acc: any[], article: any) => {
         const category = categorize(article.title, article.description || "");
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-        if (categoryCounts[category] > 2) return acc; // max 2 per category
+        if (categoryCounts[category] > 3) return acc; // max 3 per category
         acc.push({
           title: article.title,
-          description: article.description || article.content || "Breaking news",
+          description: article.description || "Breaking news",
           location: geolocateFromText(article.title + " " + (article.description || "") + " " + (article.source?.name || "")),
-          source: "NewsAPI",
+          source: `NewsAPI / ${article.source?.name || "Unknown"}`,
           category,
           timestamp: new Date(article.publishedAt).toISOString(),
         });
