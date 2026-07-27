@@ -140,24 +140,6 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
               </div>
             </div>
 
-            <div>
-              <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
-              <div className="space-y-2">
-                <a href={analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#1e3a5f] bg-[#0f172a] p-3 text-sm text-cyan-400 hover:bg-[#1a2847] hover:border-cyan-400/50 transition">
-                  <span className="text-xs font-mono">{event.source}</span>
-                  <span className="flex-1 truncate text-slate-400">{event.title}</span>
-                  <span className="text-xs">→</span>
-                </a>
-                {analystNotes.additionalSources.map((src, idx) => (
-                  <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#1e3a5f] bg-[#0f172a] p-3 text-sm text-slate-400 hover:text-cyan-400 hover:bg-[#1a2847] hover:border-cyan-400/50 transition">
-                    <span className="text-xs">{src.name}</span>
-                    <span className="flex-1 truncate text-slate-500">{src.title}</span>
-                    <span className="text-xs">→</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-
             <div className="rounded border border-[#1e3a5f] bg-[#0f172a] p-4">
               <h2 className="mb-3 text-sm font-bold uppercase text-cyan-400">Event AI Q&A</h2>
 
@@ -205,6 +187,24 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
                   {chatLoading ? "Thinking..." : "Ask"}
                 </button>
               </form>
+            </div>
+
+            <div>
+              <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
+              <div className="space-y-2">
+                <a href={analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#1e3a5f] bg-[#0f172a] p-3 text-sm text-cyan-400 hover:bg-[#1a2847] hover:border-cyan-400/50 transition">
+                  <span className="text-xs font-mono">{event.source}</span>
+                  <span className="flex-1 truncate text-slate-400">{event.title}</span>
+                  <span className="text-xs">→</span>
+                </a>
+                {analystNotes.additionalSources.map((src, idx) => (
+                  <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#1e3a5f] bg-[#0f172a] p-3 text-sm text-slate-400 hover:text-cyan-400 hover:bg-[#1a2847] hover:border-cyan-400/50 transition">
+                    <span className="text-xs">{src.name}</span>
+                    <span className="flex-1 truncate text-slate-500">{src.title}</span>
+                    <span className="text-xs">→</span>
+                  </a>
+                ))}
+              </div>
             </div>
 
             <div className="pt-4 border-t border-[#1e3a5f]">
