@@ -20,7 +20,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
 
   const eventSnapshot = useMemo(
     () =>
-      events.slice(0, 12).map((e) => ({
+      events.slice(0, 60).map((e) => ({
         title: e.title,
         category: e.category,
         source: e.source,

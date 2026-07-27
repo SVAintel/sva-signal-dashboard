@@ -35,8 +35,10 @@ export async function POST(req: Request) {
 
   const systemContext =
     `You are an intelligence analyst assistant for Sovereign Veil Analytics. ` +
-    `Answer clearly and concisely using the event context provided. ` +
-    `Do not invent facts. If uncertain, state uncertainty and suggest what to verify.\n\n` +
+    `Answer using the event context below PLUS your own general knowledge of the region, actors, and ` +
+    `historical/geopolitical background involved — do not ask the user to supply information themselves. ` +
+    `If something falls outside both the event context and your knowledge, briefly note that in passing rather ` +
+    `than blocking on it. Keep responses practical and analyst-style.\n\n` +
     `Event context:\n` +
     `- Title: ${event.title}\n` +
     `- Category: ${event.category.replace(/_/g, " ")}\n` +
@@ -44,8 +46,7 @@ export async function POST(req: Request) {
     `- Source: ${event.source}\n` +
     `- Location: ${event.location.lat.toFixed(2)}, ${event.location.lng.toFixed(2)}\n` +
     `- Timestamp: ${event.timestamp}\n` +
-    `- Confidence: ${event.confidence}\n\n` +
-    `Keep responses practical for analysts.`;
+    `- Confidence: ${event.confidence}\n`;
 
   const chatTranscript = messages
     .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
