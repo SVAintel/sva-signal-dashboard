@@ -32,35 +32,38 @@ export default function Dashboard() {
   const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
 
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const res = await axios.get("/api/events");
-        setAllEvents(res.data);
-        setLastUpdated(
-          new Date().toLocaleString(undefined, {
-            month: "short",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            timeZoneName: "short",
-          })
-        );
-      } catch (error) {
-        console.error("Failed to fetch events:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchEvents = async (manual = false) => {
+    if (manual) setRefreshing(true);
+    try {
+      const res = await axios.get("/api/events");
+      setAllEvents(res.data);
+      setLastUpdated(
+        new Date().toLocaleString(undefined, {
+          month: "short",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          timeZoneName: "short",
+        })
+      );
+    } catch (error) {
+      console.error("Failed to fetch events:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
+  useEffect(() => {
     fetchEvents();
-    const interval = setInterval(fetchEvents, 1800000); // 30 minutes
+    const interval = setInterval(() => fetchEvents(), 1800000); // 30 minutes
     return () => clearInterval(interval);
   }, []);
 
@@ -127,6 +130,18 @@ export default function Dashboard() {
           <span className="text-[10px] text-slate-600 whitespace-nowrap ml-2">
             UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
           </span>
+          <button
+            onClick={() => fetchEvents(true)}
+            disabled={refreshing}
+            title="Refresh signals now"
+            className={`ml-2 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
+              refreshing
+                ? "border-cyan-800 text-cyan-800 cursor-not-allowed"
+                : "border-cyan-600 text-cyan-400 hover:bg-cyan-900/30"
+            }`}
+          >
+            {refreshing ? "⟳ REFRESHING…" : "⟳ REFRESH"}
+          </button>
         </div>
       </header>
 
