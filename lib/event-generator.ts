@@ -1,10 +1,7 @@
 import { Event } from "@/lib/types";
-import { CONFLICTS } from "@/lib/conflict-data";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-3.6-flash";
 
 // Geocode by scanning article text for known place names.
 // Returns best match or a random plausible land coordinate as fallback.
@@ -149,129 +146,7 @@ export async function generateMockEvents(): Promise<Event[]> {
     console.error("Error fetching events:", error);
   }
 
-  const finalEvents = events.length > 0 ? events : getFallbackEvents();
-
-  // Free-tier Gemini quota is only 20 requests/day total (shared with chat features),
-  // so we can't run every signal through the AI analyst — instead prioritize the
-  // highest-severity signals each refresh and give the rest the canned fallback notes.
-  const severityRank: Record<string, number> = {
-    war: 0, nuclear: 1, biological: 2, counter_terrorism: 3, political_unrest: 4,
-    cyber: 5, energy: 6, humanitarian: 7, natural_disaster: 8, market: 9,
-  };
-  const priorityEvents = [...finalEvents]
-    .sort((a, b) => (severityRank[a.category] ?? 10) - (severityRank[b.category] ?? 10))
-    .slice(0, 5);
-
-  await enrichEventsWithAIAssessments(priorityEvents);
-
-  return finalEvents;
-}
-
-// Calls Gemini once per event, with a small in-memory cache (so repeat/overlapping
-// articles across refreshes don't re-burn rate limit), limited concurrency, and a
-// retry-with-backoff on 429s. Falls back to canned notes if the AI call still fails.
-const aiAssessmentCache = new Map<string, { notes: string; watchPoints: string[]; expires: number }>();
-const AI_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — conserve scarce free-tier quota
-const AI_CONCURRENCY = 3;
-
-function cacheKeyFor(event: Event): string {
-  return `${event.category}::${event.title.slice(0, 100)}`;
-}
-
-async function callGeminiForEvent(event: Event, conflictSummary: string): Promise<{ notes: string; watchPoints: string[] } | null> {
-  const prompt =
-    `You are an intelligence analyst for Sovereign Veil Analytics. Analyze this SPECIFIC signal ` +
-    `(do not give a generic template answer — reference concrete details from this event):\n\n` +
-    `Title: ${event.title}\n` +
-    `Category: ${event.category}\n` +
-    `Description: ${event.description}\n` +
-    `Source: ${event.source}\n` +
-    `Location: ${event.location.lat.toFixed(2)}, ${event.location.lng.toFixed(2)}\n` +
-    `Timestamp: ${event.timestamp}\n\n` +
-    `Reference (ongoing armed conflicts, use only if relevant to this event):\n${conflictSummary}\n\n` +
-    `Respond with ONLY raw JSON (no markdown fences) in this exact shape:\n` +
-    `{"paragraphs": ["<paragraph 1: what happened and why it matters, specific to this event>", ` +
-    `"<paragraph 2: recommended analyst action / next steps specific to this event>"], ` +
-    `"watchPoints": ["<specific indicator 1>", "<specific indicator 2>", "<specific indicator 3>", ` +
-    `"<specific indicator 4>", "<specific indicator 5>", "<specific indicator 6>"]}`;
-
-  for (let attempt = 0; attempt < 1; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY as string },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(timeout);
-
-      if (res.status === 429) {
-        // Rate limited — back off briefly and retry once.
-        await new Promise((r) => setTimeout(r, 1500 + attempt * 1500));
-        continue;
-      }
-
-      const data = await res.json();
-      const raw: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!raw) return null;
-
-      const cleaned = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "");
-      const parsed = JSON.parse(cleaned);
-
-      if (Array.isArray(parsed.paragraphs) && parsed.paragraphs.length > 0) {
-        return {
-          notes: parsed.paragraphs.join("\n\n"),
-          watchPoints: Array.isArray(parsed.watchPoints) ? parsed.watchPoints : [],
-        };
-      }
-      return null;
-    } catch {
-      clearTimeout(timeout);
-      return null;
-    }
-  }
-  return null;
-}
-
-async function enrichEventsWithAIAssessments(events: Event[]): Promise<void> {
-  if (!GEMINI_API_KEY || events.length === 0) return;
-
-  const conflictSummary = CONFLICTS
-    .map((c) => `- ${c.name} (${c.countries.join("/")}): ${c.actors.join(" vs ")}. ${c.description}`)
-    .join("\n");
-
-  const now = Date.now();
-  const queue = [...events];
-
-  const worker = async () => {
-    while (queue.length > 0) {
-      const event = queue.shift();
-      if (!event) return;
-
-      const key = cacheKeyFor(event);
-      const cached = aiAssessmentCache.get(key);
-      if (cached && cached.expires > now) {
-        event.aiNotes = cached.notes;
-        event.watchPoints = cached.watchPoints;
-        continue;
-      }
-
-      const result = await callGeminiForEvent(event, conflictSummary);
-      if (result) {
-        event.aiNotes = result.notes;
-        event.watchPoints = result.watchPoints;
-        aiAssessmentCache.set(key, { ...result, expires: now + AI_CACHE_TTL_MS });
-      }
-      // On failure, the existing fallback aiNotes/watchPoints remain in place.
-    }
-  };
-
-  await Promise.all(Array.from({ length: Math.min(AI_CONCURRENCY, events.length) }, () => worker()));
+  return events.length > 0 ? events : getFallbackEvents();
 }
 
 // Fallback events if APIs fail
