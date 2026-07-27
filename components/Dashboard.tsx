@@ -90,7 +90,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-[#d4b36a]" />
-            <span className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">SVA Signal</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Sovergein Veil Analytics</span>
           </div>
           <span className="text-xs text-slate-500">|</span>
           <span className="text-xs uppercase tracking-widest text-slate-500">
@@ -217,4 +217,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
