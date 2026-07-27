@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { CONFLICTS } from "@/lib/conflict-data";
 
-export const dynamic = "force-dynamic";
+// Underlying datasets already carry long revalidate windows (6h/12h/7d) below —
+// no need to force this route dynamic on top of that.
+export const revalidate = 21600;
 
 const SHIPPING_LANES_URL =
   "https://raw.githubusercontent.com/newzealandpaul/Shipping-Lanes/main/data/Shipping_Lanes_v1.geojson";

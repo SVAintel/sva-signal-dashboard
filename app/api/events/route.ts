@@ -1,9 +1,9 @@
 import { generateMockEvents } from "@/lib/event-generator";
 
-// Force this route to run fresh on every request instead of being
-// statically pre-rendered at build time — signals must be live per pull.
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// Underlying external APIs (NewsAPI especially) have strict daily quotas, so this
+// route relies on fetch-level revalidation inside event-generator.ts rather than
+// force-dynamic — it stays "live" on a rolling window without exhausting quotas.
+export const revalidate = 300;
 
 export async function GET() {
   try {

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
-export const dynamic = "force-dynamic";
+// Already caches the underlying YouTube fetch for 30 min (see below) — no need
+// to force this route to be fully dynamic on top of that.
+export const revalidate = 1800;
 
 const CHANNELS = [
   { name: "Al Jazeera", channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg", region: "GLOBAL" },
