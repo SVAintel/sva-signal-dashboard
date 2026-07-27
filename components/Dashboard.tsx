@@ -130,18 +130,6 @@ export default function Dashboard() {
           <span className="text-[10px] text-slate-600 whitespace-nowrap ml-2">
             UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
           </span>
-          <button
-            onClick={() => fetchEvents(true)}
-            disabled={refreshing}
-            title="Refresh signals now"
-            className={`ml-2 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
-              refreshing
-                ? "border-cyan-800 text-cyan-800 cursor-not-allowed"
-                : "border-cyan-600 text-cyan-400 hover:bg-cyan-900/30"
-            }`}
-          >
-            {refreshing ? "⟳ REFRESHING…" : "⟳ REFRESH"}
-          </button>
         </div>
       </header>
 
