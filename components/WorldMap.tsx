@@ -1,6 +1,6 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
@@ -101,6 +101,12 @@ interface MapLayers {
   ports: boolean;
 }
 
+interface MapLayerData {
+  tradeRoutes: Array<{ name: string; points: [number, number][] }>;
+  conflictZones: Array<{ name: string; center: [number, number]; radiusKm: number; intensity: number }>;
+  ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+}
+
 function MapFitter() {
   const map = useMap();
 
@@ -144,12 +150,18 @@ export default function WorldMap({
   selectedEvent,
   onSelectEvent,
   activeLayers,
+  layerData,
 }: {
   events: Event[];
   selectedEvent: Event | null;
   onSelectEvent: (event: Event) => void;
   activeLayers: MapLayers;
+  layerData: MapLayerData | null;
 }) {
+  const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
+  const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
+  const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS.map((p) => ({ ...p, country: "N/A", size: "Unknown" }));
+
   return (
     <MapContainer
       center={[20, 0]}
@@ -168,7 +180,7 @@ export default function WorldMap({
         noWrap={true}
       />
       {activeLayers.tradeRoutes &&
-        TRADE_ROUTES.map((route) => (
+        routesToRender.map((route) => (
           <Polyline
             key={route.name}
             positions={route.points}
@@ -179,25 +191,36 @@ export default function WorldMap({
         ))}
 
       {activeLayers.conflictZones &&
-        CONFLICT_ZONES.map((zone) => (
-          <Polygon
-            key={zone.name}
-            positions={zone.area}
-            pathOptions={{ color: "#ef4444", weight: 1.5, fillColor: "#ef4444", fillOpacity: 0.14 }}
-          >
-            <Tooltip>{zone.name}</Tooltip>
-          </Polygon>
-        ))}
+        (zonesToRender.length > 0
+          ? zonesToRender.map((zone) => (
+              <Circle
+                key={zone.name}
+                center={zone.center}
+                radius={zone.radiusKm * 1000}
+                pathOptions={{ color: "#ef4444", weight: 1.5, fillColor: "#ef4444", fillOpacity: 0.13 }}
+              >
+                <Tooltip>{`${zone.name} • intensity ${zone.intensity}`}</Tooltip>
+              </Circle>
+            ))
+          : CONFLICT_ZONES.map((zone) => (
+              <Polygon
+                key={zone.name}
+                positions={zone.area}
+                pathOptions={{ color: "#ef4444", weight: 1.5, fillColor: "#ef4444", fillOpacity: 0.14 }}
+              >
+                <Tooltip>{zone.name}</Tooltip>
+              </Polygon>
+            )))}
 
       {activeLayers.ports &&
-        PORTS.map((port) => (
+        portsToRender.map((port) => (
           <CircleMarker
             key={port.name}
             center={[port.lat, port.lng]}
             radius={5}
             pathOptions={{ color: "#93c5fd", fillColor: "#93c5fd", fillOpacity: 0.85, weight: 1 }}
           >
-            <Tooltip>{`Port: ${port.name}`}</Tooltip>
+            <Tooltip>{`Port: ${port.name}${port.country ? ` (${port.country})` : ""}`}</Tooltip>
           </CircleMarker>
         ))}
 

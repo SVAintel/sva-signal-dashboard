@@ -29,6 +29,11 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
 
 type SidebarTab = "events" | "news" | "stocks" | "analyst";
 type MapLayerKey = "tradeRoutes" | "conflictZones" | "ports";
+type MapLayerData = {
+  tradeRoutes: Array<{ name: string; points: [number, number][] }>;
+  conflictZones: Array<{ name: string; center: [number, number]; radiusKm: number; intensity: number }>;
+  ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+};
 
 export default function Dashboard() {
   const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
@@ -39,6 +44,7 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
+  const [layerData, setLayerData] = useState<MapLayerData | null>(null);
   const [activeLayers, setActiveLayers] = useState({
     tradeRoutes: true,
     conflictZones: true,
@@ -71,6 +77,20 @@ export default function Dashboard() {
   useEffect(() => {
     fetchEvents();
     const interval = setInterval(() => fetchEvents(), 1800000); // 30 minutes
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchLayers = async () => {
+      try {
+        const res = await axios.get("/api/map-layers");
+        setLayerData(res.data);
+      } catch (error) {
+        console.error("Failed to fetch map layers:", error);
+      }
+    };
+    fetchLayers();
+    const interval = setInterval(fetchLayers, 3600000); // 60 minutes
     return () => clearInterval(interval);
   }, []);
 
@@ -242,6 +262,7 @@ export default function Dashboard() {
             selectedEvent={selectedEvent}
             onSelectEvent={handleEventSelect}
             activeLayers={activeLayers}
+            layerData={layerData}
           />
         </div>
       </div>
