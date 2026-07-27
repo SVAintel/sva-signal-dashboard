@@ -1,7 +1,10 @@
 import { Event } from "@/lib/types";
+import { CONFLICTS } from "@/lib/conflict-data";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-3.6-flash";
 
 // Geocode by scanning article text for known place names.
 // Returns best match or a random plausible land coordinate as fallback.
@@ -146,7 +149,77 @@ export async function generateMockEvents(): Promise<Event[]> {
     console.error("Error fetching events:", error);
   }
 
-  return events.length > 0 ? events : getFallbackEvents();
+  const finalEvents = events.length > 0 ? events : getFallbackEvents();
+
+  // Run every pulled signal through the AI analyst so each gets a unique,
+  // event-specific assessment instead of a generic canned blurb.
+  await enrichEventsWithAIAssessments(finalEvents);
+
+  return finalEvents;
+}
+
+// Calls Gemini once per event (in parallel, with a short timeout each) to produce
+// a real analyst assessment + watch points unique to that specific signal.
+// Falls back to the existing canned notes if the AI call fails or times out.
+async function enrichEventsWithAIAssessments(events: Event[]): Promise<void> {
+  if (!GEMINI_API_KEY || events.length === 0) return;
+
+  const conflictSummary = CONFLICTS
+    .map((c) => `- ${c.name} (${c.countries.join("/")}): ${c.actors.join(" vs ")}. ${c.description}`)
+    .join("\n");
+
+  await Promise.allSettled(
+    events.map(async (event) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6000);
+
+      const prompt =
+        `You are an intelligence analyst for Sovereign Veil Analytics. Analyze this SPECIFIC signal ` +
+        `(do not give a generic template answer — reference concrete details from this event):\n\n` +
+        `Title: ${event.title}\n` +
+        `Category: ${event.category}\n` +
+        `Description: ${event.description}\n` +
+        `Source: ${event.source}\n` +
+        `Location: ${event.location.lat.toFixed(2)}, ${event.location.lng.toFixed(2)}\n` +
+        `Timestamp: ${event.timestamp}\n\n` +
+        `Reference (ongoing armed conflicts, use only if relevant to this event):\n${conflictSummary}\n\n` +
+        `Respond with ONLY raw JSON (no markdown fences) in this exact shape:\n` +
+        `{"paragraphs": ["<paragraph 1: what happened and why it matters, specific to this event>", ` +
+        `"<paragraph 2: recommended analyst action / next steps specific to this event>"], ` +
+        `"watchPoints": ["<specific indicator 1>", "<specific indicator 2>", "<specific indicator 3>", ` +
+        `"<specific indicator 4>", "<specific indicator 5>", "<specific indicator 6>"]}`;
+
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY as string },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeout);
+
+        const data = await res.json();
+        const raw: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!raw) return;
+
+        const cleaned = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "");
+        const parsed = JSON.parse(cleaned);
+
+        if (Array.isArray(parsed.paragraphs) && parsed.paragraphs.length > 0) {
+          event.aiNotes = parsed.paragraphs.join("\n\n");
+        }
+        if (Array.isArray(parsed.watchPoints) && parsed.watchPoints.length > 0) {
+          event.watchPoints = parsed.watchPoints;
+        }
+      } catch (e) {
+        clearTimeout(timeout);
+        // Leave the existing fallback aiNotes/watchPoints in place on failure.
+      }
+    })
+  );
 }
 
 // Fallback events if APIs fail

@@ -8,5 +8,6 @@ export interface Event {
   timestamp: string;
   description: string;
   aiNotes: string;
+  watchPoints?: string[];
   confidence: string;
 }
