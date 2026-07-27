@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Event } from "@/lib/types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-3.6-flash";
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 interface ChatMessage {
   role: "user" | "assistant";
