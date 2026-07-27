@@ -79,6 +79,9 @@ export default function LiveBroadcasts({ videoHeight }: LiveBroadcastsProps) {
         setResults(data.results || []);
         setSearchActive(0);
         setSearchLoading(false);
+        if ((data.results || []).length === 0 && data.error) {
+          setSearchError(data.error);
+        }
       })
       .catch(() => {
         setSearchError("Search failed");

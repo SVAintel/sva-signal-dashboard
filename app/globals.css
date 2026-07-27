@@ -55,3 +55,71 @@ body {
   animation: marker-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Radar scan-reveal effect: ring expands + fades when the sweep line crosses an event marker */
+@keyframes scan-reveal-ring {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.scan-reveal-ring {
+  animation: scan-reveal-ring 1.1s ease-out forwards;
+}
+
+/* Label bubble fade for revealed events */
+@keyframes scan-label-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  75% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.scan-label-fade {
+  animation: scan-label-fade 1.8s ease-in-out forwards;
+}
+
+/* Leaflet markers/paths get a native browser focus outline on click (white
+   ring by default) — replace it with a thin gold ring to match the theme. */
+.leaflet-container path:focus,
+.leaflet-container .leaflet-interactive:focus,
+.leaflet-marker-icon:focus {
+  outline: 1.5px solid #d4b36a;
+  outline-offset: 1px;
+}
+
+/* Leaflet's default popup chrome (content wrapper + tip) ships with a hard-
+   coded white background, which shows as a white sliver around our custom
+   dark popup content. Re-theme it: dark background, thin gold border. */
+.tactical-popup .leaflet-popup-content-wrapper,
+.tactical-popup .leaflet-popup-tip {
+  background: #111111;
+  border: 1px solid #d4b36a;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.6);
+}
+
+.tactical-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+}
+
+.tactical-popup .leaflet-popup-content {
+  margin: 0;
+}
+
+

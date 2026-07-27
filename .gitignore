@@ -8,3 +8,9 @@ node_modules
 dist
 build
 .vercel
+
+# Naval AIS disk cache (local dev only)
+.naval-cache.json
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

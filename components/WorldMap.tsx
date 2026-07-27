@@ -5,7 +5,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const makeIcon = (color: string) =>
   new L.DivIcon({
@@ -29,6 +30,63 @@ const icons: Record<string, L.DivIcon> = {
   nuclear: makeIcon("#84cc16"),
   energy: makeIcon("#d97706"),
   humanitarian: makeIcon("#f43f5e"),
+};
+
+// Naval vessel marker: a small square/diamond in slate-blue to visually
+// distinguish AIS-tracked ships from category event markers, with a heading
+// arrow when course data is available.
+const navalIcon = (course: number | null) =>
+  new L.DivIcon({
+    className: "",
+    html: `<div style="position:relative;width:14px;height:14px;transform:rotate(${course ?? 0}deg);">
+      <div style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%);
+        border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:12px solid #7dd3fc;
+        filter:drop-shadow(0 0 4px rgba(125,211,252,0.8));"></div>
+    </div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+const navalIconNoHeading = new L.DivIcon({
+  className: "",
+  html: `<div style="width:10px;height:10px;background:#7dd3fc;border:2px solid rgba(255,255,255,0.6);border-radius:2px;box-shadow:0 0 6px #7dd3fc;"></div>`,
+  iconSize: [10, 10],
+  iconAnchor: [5, 5],
+});
+
+// Military base marker: small olive shield/square, static (non-pulsing)
+// since these are fixed installations, not live-tracked assets.
+const militaryBaseIcon = new L.DivIcon({
+  className: "",
+  html: `<div style="width:9px;height:9px;background:#6b7d3d;border:1.5px solid rgba(212,179,106,0.8);box-shadow:0 0 4px rgba(107,125,61,0.8);"></div>`,
+  iconSize: [9, 9],
+  iconAnchor: [4, 4],
+});
+
+// Wildfire marker: flame-colored circle sized/opacity-scaled by Fire
+// Radiative Power (a proxy for fire intensity) so bigger fires stand out.
+const wildfireIcon = (frp: number) => {
+  const size = Math.min(18, Math.max(6, 6 + Math.sqrt(frp) / 4));
+  return new L.DivIcon({
+    className: "",
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:radial-gradient(circle,#fca5a5,#f97316 60%,#b91c1c);box-shadow:0 0 ${size / 2}px #f97316;opacity:0.85;"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
+
+// Storm marker: rotating cyclone glyph, colored by category (higher wind =
+// more red) so hurricanes stand out from tropical storms/depressions.
+const stormIcon = (classification: string) => {
+  const color = classification === "HU" ? "#ef4444" : classification === "TS" ? "#f97316" : "#facc15";
+  return new L.DivIcon({
+    className: "",
+    html: `<div style="position:relative;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};opacity:0.5;"></div>
+      <div style="font-size:14px;filter:drop-shadow(0 0 3px ${color});">🌀</div>
+    </div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
 };
 
 const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));
@@ -103,14 +161,80 @@ interface MapLayers {
   tradeRoutes: boolean;
   conflictZones: boolean;
   ports: boolean;
+  navalVessels: boolean;
+  cables: boolean;
+  pipelines: boolean;
+  militaryBases: boolean;
+  wildfires: boolean;
+  storms: boolean;
+}
+
+interface NavalVessel {
+  mmsi: string;
+  name: string;
+  lat: number;
+  lng: number;
+  course: number | null;
+  speed: number | null;
+  shipType: number | null;
+}
+
+interface Wildfire {
+  lat: number;
+  lng: number;
+  brightness: number;
+  frp: number;
+  confidence: string;
+  acqDate: string;
+  acqTime: string;
+  daynight: string;
+}
+
+interface Storm {
+  id: string;
+  name: string;
+  classification: string;
+  lat: number;
+  lng: number;
+  intensity: number | null;
+  pressure: number | null;
+  movementDir: number | null;
+  movementSpeed: number | null;
+  advisoryUrl: string | null;
+  lastUpdate: string | null;
 }
 
 interface ConflictZoneOutput extends ConflictZoneData {}
+
+interface CableFeature {
+  id: string;
+  name: string;
+  paths: [number, number][][];
+}
+
+interface PipelineFeature {
+  id: string;
+  name: string;
+  substance: "oil" | "gas";
+  paths: [number, number][][];
+}
+
+interface MilitaryBaseFeature {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  country: string | null;
+  operator: string | null;
+}
 
 interface MapLayerData {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneOutput[];
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+  cables: CableFeature[];
+  pipelines: PipelineFeature[];
+  militaryBases: MilitaryBaseFeature[];
 }
 
 function MapFitter({ visible = true }: { visible?: boolean }) {
@@ -167,12 +291,252 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
   return null;
 }
 
+// Radar-style sweep: a thin grid overlay with a bright vertical line that pulses
+// left-to-right across the map on a loop. When the sweep front crosses an
+// event marker's on-screen position, that event "reveals" — a brief expanding
+// ring + a fading label bubble with its title. Position tracking uses the live
+// Leaflet map projection (map.latLngToContainerPoint) recalculated every
+// animation frame, so it stays accurate through pans/zooms and window resizes.
+// Rendered via a portal into a dedicated Leaflet pane (z-index 550, between
+// the overlay/shadow panes and the marker pane at 600) so normal z-index
+// stacking against markers/popups works correctly. Since that pane picks up
+// Leaflet's own pan/zoom transform, an inner wrapper counter-transforms every
+// frame so its coordinate space still matches plain screen/container points.
+function ScanSweep({ events, durationMs = 9000 }: { events: Event[]; durationMs?: number }) {
+  const map = useMap();
+  const barRef = useRef<HTMLDivElement>(null);
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+  const [flashes, setFlashes] = useState<
+    { id: string; lat: number; lng: number; title: string; ts: number }[]
+  >([]);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
+  // DOM refs for each flash's wrapper, so we can reposition them every frame
+  // (on pan/zoom) via direct style writes instead of React re-renders.
+  const flashElRefs = useRef(new Map<string, HTMLDivElement | null>());
+  // Mirror of `flashes` state for the animation loop to read without being
+  // a dependency of the main step() effect (which would restart the sweep
+  // animation's timer every time a flash is added/removed).
+  const flashesRef = useRef(flashes);
+  flashesRef.current = flashes;
+  // Wrapper that stays pixel-aligned with the viewport (top-left corner) even
+  // though it now lives *inside* the Leaflet map pane (see below) so it picks
+  // up the same pan/zoom CSS transform as tiles/markers. Every frame we apply
+  // a counter-transform so its own coordinate space still matches plain
+  // on-screen container points, letting the rest of this component's math
+  // (currX, flash positions, etc.) stay exactly the same as before.
+  const anchorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Give the sweep its own Leaflet pane, sandwiched between the overlay/
+    // shadow panes (~400/500) and the marker pane (600). Rendering into a
+    // real pane (instead of a portal appended as a sibling of the whole map
+    // pane) means ordinary z-index comparisons against markers/popups work
+    // correctly — markers naturally render above the sweep, and clicking one
+    // no longer needs to hack the entire map pane's z-index to "win".
+    let pane = map.getPane("sweepPane");
+    if (!pane) {
+      pane = map.createPane("sweepPane");
+      pane.style.zIndex = "550";
+      pane.style.pointerEvents = "none";
+    }
+    setContainer(pane);
+  }, [map]);
+
+  useEffect(() => {
+    let raf: number;
+    let start: number | null = null;
+    let prevX = 0;
+    let prevProgress = 0;
+    // Avoid re-flashing the same marker multiple times within one sweep pass
+    // if it happens to straddle two consecutive animation frames.
+    const recentlyFlashed = new Map<string, number>();
+
+    const step = (t: number) => {
+      if (start === null) start = t;
+      const elapsed = (t - start) % durationMs;
+      const progress = elapsed / durationMs;
+      const size = map.getSize();
+      const width = size.x || 1;
+      const currX = progress * width;
+
+      // Counter the map pane's own pan/zoom transform so this wrapper's local
+      // (0,0) always lines up with the viewport's top-left corner, keeping
+      // all the screen-space math below (currX, flash container points)
+      // valid exactly as if this were still rendered outside the map pane.
+      if (anchorRef.current) {
+        const origin = map.containerPointToLayerPoint([0, 0]);
+        anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+        anchorRef.current.style.width = `${size.x}px`;
+        anchorRef.current.style.height = `${size.y}px`;
+      }
+
+      if (barRef.current) {
+        barRef.current.style.transform = `translateX(${currX}px)`;
+      }
+
+      // Only check for crossings on frames where the sweep moved forward normally
+      // (skip the single frame where progress wraps back to 0 at loop restart).
+      if (progress >= prevProgress) {
+        const lo = Math.min(prevX, currX);
+        const hi = Math.max(prevX, currX);
+        const newFlashes: typeof flashes = [];
+        for (const ev of eventsRef.current) {
+          const last = recentlyFlashed.get(ev.id);
+          if (last !== undefined && t - last < durationMs * 0.5) continue;
+          const pt = map.latLngToContainerPoint([ev.location.lat, ev.location.lng]);
+          if (pt.x >= lo && pt.x <= hi && pt.y >= 0 && pt.y <= size.y) {
+            recentlyFlashed.set(ev.id, t);
+            newFlashes.push({ id: `${ev.id}-${t}`, lat: ev.location.lat, lng: ev.location.lng, title: ev.title, ts: t });
+          }
+        }
+        if (newFlashes.length > 0) {
+          setFlashes((f) => [...f, ...newFlashes]);
+        }
+      }
+
+      // Reposition all live flash bubbles to stay glued to their lat/lng,
+      // regardless of pan/zoom — recomputed from the live map projection
+      // every frame rather than a one-time screen coordinate.
+      for (const [id, el] of flashElRefs.current) {
+        if (!el) continue;
+        const fl = flashesRef.current.find((f) => f.id === id);
+        if (!fl) continue;
+        const pt = map.latLngToContainerPoint([fl.lat, fl.lng]);
+        el.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
+      }
+
+      prevX = currX;
+      prevProgress = progress;
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [map, durationMs]);
+
+  // Sweep out old flash entries so the array doesn't grow unbounded
+  useEffect(() => {
+    if (flashes.length === 0) return;
+    const id = setTimeout(() => {
+      setFlashes((f) => f.filter((fl) => performance.now() - fl.ts < 2000));
+      for (const key of Array.from(flashElRefs.current.keys())) {
+        if (!flashes.some((fl) => fl.id === key)) flashElRefs.current.delete(key);
+      }
+    }, 500);
+    return () => clearTimeout(id);
+  }, [flashes]);
+
+  if (!container) return null;
+
+  return createPortal(
+    <div
+      ref={anchorRef}
+      style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", overflow: "hidden" }}
+    >
+      {/* Thin static grid */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage:
+            "repeating-linear-gradient(to right, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px), repeating-linear-gradient(to bottom, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px)",
+        }}
+      />
+      {/* Sweeping line — thin bright core + soft wide glow trailing behind it */}
+      <div
+        ref={barRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: -60,
+          width: 120,
+          willChange: "transform",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "linear-gradient(to right, transparent, rgba(212,179,106,0.16), transparent)",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: 60,
+            width: 2,
+            background: "rgba(212,179,106,0.95)",
+            boxShadow: "0 0 16px 3px rgba(212,179,106,0.6)",
+          }}
+        />
+      </div>
+
+      {/* Reveal flashes — positioned via a direct ref + transform, updated
+          every animation frame from lat/lng, so they track pan/zoom instead
+          of staying pinned to the screen coordinates from when they fired. */}
+      {flashes.map((f) => (
+        <div
+          key={f.id}
+          ref={(el) => {
+            flashElRefs.current.set(f.id, el);
+          }}
+          style={{ position: "absolute", left: 0, top: 0, willChange: "transform" }}
+        >
+          <div
+            className="scan-reveal-ring"
+            style={{
+              position: "absolute",
+              left: -18,
+              top: -18,
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: "2px solid #d4b36a",
+            }}
+          />
+          <div
+            className="scan-label-fade"
+            style={{
+              position: "absolute",
+              left: 12,
+              top: -10,
+              whiteSpace: "nowrap",
+              background: "#0e0e0ecc",
+              border: "1px solid #3a3a3a",
+              borderRadius: 4,
+              padding: "3px 8px",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#d4b36a",
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {f.title}
+          </div>
+        </div>
+      ))}
+    </div>,
+    container
+  );
+}
+
 export default function WorldMap({
   events,
   selectedEvent,
   onSelectEvent,
   activeLayers,
   layerData,
+  navalVessels = [],
+  wildfires = [],
+  storms = [],
   onSelectConflictZone,
   mobileVisible = true,
 }: {
@@ -181,6 +545,9 @@ export default function WorldMap({
   onSelectEvent: (event: Event) => void;
   activeLayers: MapLayers;
   layerData: MapLayerData | null;
+  navalVessels?: NavalVessel[];
+  wildfires?: Wildfire[];
+  storms?: Storm[];
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
   mobileVisible?: boolean;
 }) {
@@ -200,6 +567,7 @@ export default function WorldMap({
       zoomControl={false}
     >
       <MapFitter visible={mobileVisible} />
+      <ScanSweep events={events} />
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
@@ -256,14 +624,96 @@ export default function WorldMap({
           </CircleMarker>
         ))}
 
+      {activeLayers.navalVessels &&
+        navalVessels.map((vessel) => (
+          <Marker
+            key={vessel.mmsi}
+            position={[vessel.lat, vessel.lng]}
+            icon={vessel.course !== null ? navalIcon(vessel.course) : navalIconNoHeading}
+          >
+            <Tooltip>
+              {`⚓ ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.cables &&
+        (layerData?.cables || []).map((cable) =>
+          cable.paths.map((path, idx) => (
+            <Polyline
+              key={`${cable.id}-${idx}`}
+              positions={path}
+              pathOptions={{ color: "#22d3ee", weight: 1.5, opacity: 0.55, dashArray: "2 6" }}
+            >
+              <Tooltip>{`🔌 ${cable.name}`}</Tooltip>
+            </Polyline>
+          ))
+        )}
+
+      {activeLayers.pipelines &&
+        (layerData?.pipelines || []).map((pipeline) =>
+          pipeline.paths.map((path, idx) => (
+            <Polyline
+              key={`${pipeline.id}-${idx}`}
+              positions={path}
+              pathOptions={{
+                color: pipeline.substance === "gas" ? "#eab308" : "#b45309",
+                weight: 2,
+                opacity: 0.75,
+              }}
+            >
+              <Tooltip>{`${pipeline.substance === "gas" ? "🔥" : "🛢️"} ${pipeline.name}`}</Tooltip>
+            </Polyline>
+          ))
+        )}
+
+      {activeLayers.militaryBases &&
+        (layerData?.militaryBases || []).map((base) => (
+          <Marker key={base.id} position={[base.lat, base.lng]} icon={militaryBaseIcon}>
+            <Tooltip>
+              {`🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}`}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.wildfires &&
+        wildfires.map((fire, idx) => (
+          <Marker key={`fire-${idx}`} position={[fire.lat, fire.lng]} icon={wildfireIcon(fire.frp)}>
+            <Tooltip>
+              {`🔥 FRP ${fire.frp.toFixed(0)} MW — ${fire.acqDate} ${fire.confidence}% confidence`}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.storms &&
+        storms.map((storm) => (
+          <Marker key={storm.id} position={[storm.lat, storm.lng]} icon={stormIcon(storm.classification)}>
+            <Tooltip>
+              {`${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${
+                storm.pressure !== null ? `, ${storm.pressure} mb` : ""
+              }`}
+            </Tooltip>
+          </Marker>
+        ))}
+
       {events.map((event) => (
         <Marker
           key={event.id}
           position={[event.location.lat, event.location.lng]}
           icon={icons[event.category] || icons.war}
+          eventHandlers={{
+            // Bring the clicked marker to the front of the marker pane so it's
+            // visible above every other marker layer (naval, bases, wildfires,
+            // storms) while its popup is open; reset once the popup closes.
+            // The radar sweep now renders in its own Leaflet pane (z-index
+            // 550, below the marker pane's 600), so this alone is enough to
+            // also keep the focused marker above the sweep line/labels.
+            click: (e) => e.target.setZIndexOffset(1000),
+            popupclose: (e) => e.target.setZIndexOffset(0),
+          }}
         >
           <Popup className="tactical-popup">
-            <div style={{ background: "#111111", border: "1px solid #3a3a3a", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+            <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
               <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
                 {event.category.replace(/_/g, " ")}
               </div>

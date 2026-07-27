@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { CONFLICTS } from "@/lib/conflict-data";
+import cablesData from "@/lib/data/cables.json";
+import pipelinesData from "@/lib/data/pipelines.json";
+import militaryBasesData from "@/lib/data/military-bases.json";
 
 // Underlying datasets already carry long revalidate windows (6h/12h/7d) below —
 // no need to force this route dynamic on top of that.
@@ -11,6 +14,11 @@ const PORTS_URL =
   "https://data.harvestportal.org/dataset/45b504e2-9ae5-4c30-9125-b1d2ae301f05/resource/32f52965-1ae1-47a0-b1ad-45d1bf64093b/download/ports_of_the_world_wpi.geojson";
 const COUNTRIES_URL =
   "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
+// Submarine cables and oil/gas pipelines are physical infrastructure that
+// essentially never changes route day-to-day, so both are bundled as static
+// snapshots (lib/data/*.json, built by scripts/fetch-infra-data.mjs) rather
+// than fetched live on every request — no runtime dependency on an external
+// repo's uptime (cables) or Overpass's rate limits (pipelines).
 
 interface RouteFeature {
   name: string;
@@ -23,6 +31,28 @@ interface PortFeature {
   lat: number;
   lng: number;
   size: string;
+}
+
+interface CableFeature {
+  id: string;
+  name: string;
+  paths: [number, number][][];
+}
+
+interface PipelineFeature {
+  id: string;
+  name: string;
+  substance: "oil" | "gas";
+  paths: [number, number][][];
+}
+
+interface MilitaryBaseFeature {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  country: string | null;
+  operator: string | null;
 }
 
 interface ConflictZoneOutput {
@@ -171,11 +201,15 @@ export async function GET() {
     const tradeRoutes = shippingData ? parseShippingRoutes(shippingData) : [];
     const ports = portsData ? parsePorts(portsData) : [];
     const conflictZones = countriesData ? buildConflictZones(countriesData) : [];
+    // Cables, pipelines, and military bases are pre-parsed static snapshots — no live fetch.
+    const cables = cablesData as CableFeature[];
+    const pipelines = pipelinesData as PipelineFeature[];
+    const militaryBases = militaryBasesData as MilitaryBaseFeature[];
 
-    return NextResponse.json({ tradeRoutes, conflictZones, ports });
+    return NextResponse.json({ tradeRoutes, conflictZones, ports, cables, pipelines, militaryBases });
   } catch (error) {
     console.error("map-layers error:", error);
-    return NextResponse.json({ tradeRoutes: [], conflictZones: [], ports: [] });
+    return NextResponse.json({ tradeRoutes: [], conflictZones: [], ports: [], cables: [], pipelines: [], militaryBases: [] });
   }
 }
 

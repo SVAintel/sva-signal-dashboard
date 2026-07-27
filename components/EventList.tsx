@@ -102,7 +102,10 @@ export default function EventList({
               <div className="mt-1 flex items-center justify-between">
                 <span className="text-[10px] text-slate-600">{event.source}</span>
                 <span className="text-[9px] text-slate-700">
-                  {new Date(event.timestamp).toISOString().slice(11, 16)}Z
+                  {new Date(event.timestamp).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
               </div>
 

@@ -1,4 +1,5 @@
 import { Event } from "@/lib/types";
+import Parser from "rss-parser";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
@@ -114,6 +115,7 @@ export async function generateMockEvents(): Promise<Event[]> {
     // Fetch from real APIs in parallel with 5 second timeout each
     const results = await Promise.allSettled([
       fetchNewsAPIEvents(),
+      fetchRSSEvents(),
       fetchAlphaVantageEvents(),
       fetchUSGSEvents(),
       fetchGDELTEvents(),
@@ -155,7 +157,7 @@ function getFallbackEvents(): Event[] {
     {
       id: "evt-0001",
       title: "Global Intelligence Dashboard - Live",
-      description: "Real-time events from NewsAPI, Alpha Vantage, USGS, GDELT, ACLED, CoinGecko, and EMSC",
+      description: "Real-time events from NewsAPI, RSS feeds, Alpha Vantage, USGS, GDELT, ACLED, CoinGecko, and EMSC",
       category: "war",
       location: { lat: 35, lng: 0 },
       source: "Dashboard",
@@ -164,6 +166,55 @@ function getFallbackEvents(): Event[] {
       confidence: "pending",
     },
   ];
+}
+
+// Shared text-classification helpers used by both NewsAPI and RSS ingestion
+const NEWS_EXCLUDE_KEYWORDS = [
+  "opinion", "editorial", "analysis:", "commentary", "column:", "review",
+  "how to", "tips for", "best of", "ranked:", "why you", "what you need",
+  "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", "box office",
+  "actor", "celebrity", "oscars", "concert", "music chart", "sports",
+  "video game", "esports", "nfl", "nba", "mlb", "fifa", "premier league",
+  "entertainment", "streaming", "sequel", "tv show", "reality show",
+  "recipe", "fashion", "beauty", "horoscope", "crossword",
+];
+
+const NEWS_BREAKING_SIGNALS = [
+  "killed", "dead", "attack", "airstrike", "missile", "bomb", "explosion",
+  "troops", "invasion", "seized", "arrest", "detained", "sanction", "strike",
+  "outbreak", "virus", "pandemic", "epidemic", "contamination",
+  "cyberattack", "hack", "breach", "ransomware",
+  "nuclear", "radiation", "warhead", "reactor",
+  "protest", "riot", "coup", "unrest", "demonstration",
+  "refugee", "displaced", "famine", "humanitarian crisis",
+  "pipeline", "blackout", "power grid", "energy crisis",
+  "breaking", "urgent", "developing", "update:", "latest:",
+  "fires on", "clashes", "offensive", "ceasefire", "escalat",
+];
+
+function isBreakingNews(title: string, desc: string) {
+  const text = (title + " " + desc).toLowerCase();
+  if (NEWS_EXCLUDE_KEYWORDS.some(kw => text.includes(kw))) return false;
+  return NEWS_BREAKING_SIGNALS.some(kw => text.includes(kw));
+}
+
+function categorizeNewsText(title: string, description: string): string {
+  const text = (title + " " + description).toLowerCase();
+  if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "epidemic", "plague", "infection", "contamination"].some(kw => text.includes(kw)))
+    return "biological";
+  if (["protest", "coup", "uprising", "riot", "civil unrest", "election fraud", "demonstrations", "political crisis", "impeach", "overthrow"].some(kw => text.includes(kw)))
+    return "political_unrest";
+  if (["cyberattack", "ransomware", "hacking", "data breach", "malware", "phishing", "cyber", "infrastructure attack"].some(kw => text.includes(kw)))
+    return "cyber";
+  if (["nuclear", "radiation", "iaea", "proliferation", "uranium", "warhead", "reactor accident", "dirty bomb"].some(kw => text.includes(kw)))
+    return "nuclear";
+  if (["energy crisis", "pipeline", "oil sanction", "gas supply", "energy security", "blackout", "power grid"].some(kw => text.includes(kw)))
+    return "energy";
+  if (["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"].some(kw => text.includes(kw)))
+    return "humanitarian";
+  if (["terror", "isis", "al-qaeda", "bombing", "jihad", "extremist"].some(kw => text.includes(kw)))
+    return "counter_terrorism";
+  return "war";
 }
 
 // NewsAPI - breaking news for live geopolitical/threat events
@@ -199,62 +250,12 @@ async function fetchNewsAPIEvents() {
       return true;
     });
 
-    // Hard exclude: editorials, opinions, reviews, entertainment, sports
-    const excludeKeywords = [
-      "opinion", "editorial", "analysis:", "commentary", "column:", "review",
-      "how to", "tips for", "best of", "ranked:", "why you", "what you need",
-      "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", "box office",
-      "actor", "celebrity", "oscars", "concert", "music chart", "sports",
-      "video game", "esports", "nfl", "nba", "mlb", "fifa", "premier league",
-      "entertainment", "streaming", "sequel", "tv show", "reality show",
-      "recipe", "fashion", "beauty", "horoscope", "crossword",
-    ];
-
-    // Require at least one hard news signal word in title or description
-    const breakingSignals = [
-      "killed", "dead", "attack", "airstrike", "missile", "bomb", "explosion",
-      "troops", "invasion", "seized", "arrest", "detained", "sanction", "strike",
-      "outbreak", "virus", "pandemic", "epidemic", "contamination",
-      "cyberattack", "hack", "breach", "ransomware",
-      "nuclear", "radiation", "warhead", "reactor",
-      "protest", "riot", "coup", "unrest", "demonstration",
-      "refugee", "displaced", "famine", "humanitarian crisis",
-      "pipeline", "blackout", "power grid", "energy crisis",
-      "breaking", "urgent", "developing", "update:", "latest:",
-      "fires on", "clashes", "offensive", "ceasefire", "escalat",
-    ];
-
-    const isBreakingNews = (title: string, desc: string) => {
-      const text = (title + " " + desc).toLowerCase();
-      if (excludeKeywords.some(kw => text.includes(kw))) return false;
-      return breakingSignals.some(kw => text.includes(kw));
-    };
-
-    const categorize = (title: string, description: string): string => {
-      const text = (title + " " + description).toLowerCase();
-      if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "epidemic", "plague", "infection", "contamination"].some(kw => text.includes(kw)))
-        return "biological";
-      if (["protest", "coup", "uprising", "riot", "civil unrest", "election fraud", "demonstrations", "political crisis", "impeach", "overthrow"].some(kw => text.includes(kw)))
-        return "political_unrest";
-      if (["cyberattack", "ransomware", "hacking", "data breach", "malware", "phishing", "cyber", "infrastructure attack"].some(kw => text.includes(kw)))
-        return "cyber";
-      if (["nuclear", "radiation", "iaea", "proliferation", "uranium", "warhead", "reactor accident", "dirty bomb"].some(kw => text.includes(kw)))
-        return "nuclear";
-      if (["energy crisis", "pipeline", "oil sanction", "gas supply", "energy security", "blackout", "power grid"].some(kw => text.includes(kw)))
-        return "energy";
-      if (["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"].some(kw => text.includes(kw)))
-        return "humanitarian";
-      if (["terror", "isis", "al-qaeda", "bombing", "jihad", "extremist"].some(kw => text.includes(kw)))
-        return "counter_terrorism";
-      return "war";
-    };
-
     const categoryCounts: Record<string, number> = {};
 
     return unique
       .filter((article: any) => isBreakingNews(article.title || "", article.description || ""))
       .reduce((acc: any[], article: any) => {
-        const category = categorize(article.title, article.description || "");
+        const category = categorizeNewsText(article.title, article.description || "");
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
         if (categoryCounts[category] > 5) return acc; // max 5 per category
         acc.push({
@@ -272,6 +273,96 @@ async function fetchNewsAPIEvents() {
     console.error("NewsAPI error:", e);
     return [];
   }
+}
+
+// RSS feeds — free, no API key, no rate-limit quota. Pulls straight from
+// major outlets' public world/breaking-news feeds and runs them through the
+// same breaking-news filter + categorizer used for NewsAPI, so this scales up
+// event volume without touching any metered API budget.
+export const RSS_FEEDS: { name: string; url: string }[] = [
+  { name: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+  { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
+  { name: "The Guardian World", url: "https://www.theguardian.com/world/rss" },
+  { name: "NYT World", url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml" },
+  { name: "DW World", url: "https://rss.dw.com/rdf/rss-en-world" },
+  { name: "Sky News World", url: "https://feeds.skynews.com/feeds/rss/world.xml" },
+  { name: "France24 World", url: "https://www.france24.com/en/rss" },
+  { name: "UN News", url: "https://news.un.org/feed/subscribe/en/news/all/rss.xml" },
+];
+
+// Opinion/editorial/analysis feeds — kept separate from the hard-news list
+// above because these are explicitly commentary, not breaking events, and
+// should never feed the map's event-classification pipeline. Used only by
+// the Live News side panel (app/api/news/route.ts) which is unfiltered.
+export const OPINION_RSS_FEEDS: { name: string; url: string }[] = [
+  { name: "The Guardian Opinion", url: "https://www.theguardian.com/commentisfree/rss" },
+  { name: "NYT Opinion", url: "https://rss.nytimes.com/services/xml/rss/nyt/Opinion.xml" },
+];
+
+let rssParser: Parser | null = null;
+export function getRssParser() {
+  if (!rssParser) {
+    rssParser = new Parser({ timeout: 6000 });
+  }
+  return rssParser;
+}
+
+// Module-level in-memory cache (survives across requests within the same
+// serverless/lambda instance) so RSS feeds aren't re-fetched on every event
+// request — same caching philosophy applied to the metered APIs earlier.
+let rssCache: { data: any[]; ts: number } | null = null;
+const RSS_CACHE_MS = 10 * 60 * 1000; // 10 minutes
+
+async function fetchRSSEvents() {
+  const now = Date.now();
+  if (rssCache && now - rssCache.ts < RSS_CACHE_MS) {
+    return rssCache.data;
+  }
+
+  const parser = getRssParser();
+  const categoryCounts: Record<string, number> = {};
+  const seen = new Set<string>();
+  const out: any[] = [];
+
+  const results = await Promise.allSettled(
+    RSS_FEEDS.map(async (feed) => {
+      const parsed = await parser.parseURL(feed.url);
+      return { feed, items: parsed.items || [] };
+    })
+  );
+
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    const { feed, items } = r.value;
+    for (const item of items) {
+      const title = (item.title || "").trim();
+      const description = (item.contentSnippet || item.content || item.summary || "").trim();
+      if (!title) continue;
+
+      const key = title.slice(0, 60);
+      if (seen.has(key)) continue;
+
+      if (!isBreakingNews(title, description)) continue;
+
+      const category = categorizeNewsText(title, description);
+      categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+      if (categoryCounts[category] > 8) continue; // cap per category across all RSS feeds combined
+
+      seen.add(key);
+      out.push({
+        title,
+        description: description ? description.slice(0, 240) : "Breaking news",
+        location: geolocateFromText(title + " " + description + " " + feed.name),
+        source: `RSS / ${feed.name}`,
+        url: item.link || feed.url,
+        category,
+        timestamp: item.isoDate ? new Date(item.isoDate).toISOString() : new Date().toISOString(),
+      });
+    }
+  }
+
+  rssCache = { data: out, ts: now };
+  return out;
 }
 
 // Alpha Vantage - market events (with timeout)

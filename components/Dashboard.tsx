@@ -30,11 +30,55 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
 };
 
 type SidebarTab = "events" | "news" | "stocks" | "analyst";
-type MapLayerKey = "tradeRoutes" | "conflictZones" | "ports";
+type MapLayerKey =
+  | "tradeRoutes"
+  | "conflictZones"
+  | "ports"
+  | "navalVessels"
+  | "cables"
+  | "pipelines"
+  | "militaryBases"
+  | "wildfires"
+  | "storms";
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneData[];
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+  cables: Array<{ id: string; name: string; paths: [number, number][][] }>;
+  pipelines: Array<{ id: string; name: string; substance: "oil" | "gas"; paths: [number, number][][] }>;
+  militaryBases: Array<{ id: string; name: string; lat: number; lng: number; country: string | null; operator: string | null }>;
+};
+type NavalVessel = {
+  mmsi: string;
+  name: string;
+  lat: number;
+  lng: number;
+  course: number | null;
+  speed: number | null;
+  shipType: number | null;
+};
+type Wildfire = {
+  lat: number;
+  lng: number;
+  brightness: number;
+  frp: number;
+  confidence: string;
+  acqDate: string;
+  acqTime: string;
+  daynight: string;
+};
+type Storm = {
+  id: string;
+  name: string;
+  classification: string;
+  lat: number;
+  lng: number;
+  intensity: number | null;
+  pressure: number | null;
+  movementDir: number | null;
+  movementSpeed: number | null;
+  advisoryUrl: string | null;
+  lastUpdate: string | null;
 };
 
 export default function Dashboard() {
@@ -50,10 +94,23 @@ export default function Dashboard() {
   const [mobileView, setMobileView] = useState<"panel" | "map">("map");
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
+  const [navalVessels, setNavalVessels] = useState<NavalVessel[]>([]);
+  const [navalLoading, setNavalLoading] = useState(false);
+  const [navalLastChecked, setNavalLastChecked] = useState<string>("");
+  const [wildfires, setWildfires] = useState<Wildfire[]>([]);
+  const [wildfiresLoading, setWildfiresLoading] = useState(false);
+  const [storms, setStorms] = useState<Storm[]>([]);
+  const [stormsLoading, setStormsLoading] = useState(false);
   const [activeLayers, setActiveLayers] = useState({
     tradeRoutes: false,
     conflictZones: false,
     ports: false,
+    navalVessels: false,
+    cables: false,
+    pipelines: false,
+    militaryBases: false,
+    wildfires: false,
+    storms: false,
   });
 
   // Resizable panel state — sidebar width (drag divider between sidebar/map)
@@ -147,6 +204,74 @@ export default function Dashboard() {
     const interval = setInterval(fetchLayers, 3600000); // 60 minutes
     return () => clearInterval(interval);
   }, []);
+
+  // Naval vessel layer is a live, best-effort AIS feed (military-flagged ships
+  // only, sparse coverage) — only poll it while the layer is actually toggled
+  // on, since each request opens a short-lived upstream WebSocket connection.
+  // Server now self-refreshes the AIS scan every 30 min in the background and
+  // persists results to disk (see app/api/naval/route.ts) — GET here is an
+  // instant read of that cache, never a live 90s scan. Poll frequently so the
+  // "SCANNING…" status and vessel count update promptly once a background
+  // refresh completes, without any cost since reads are cheap.
+  useEffect(() => {
+    if (!activeLayers.navalVessels) return;
+    const fetchNaval = async () => {
+      try {
+        const res = await axios.get("/api/naval");
+        setNavalVessels(res.data?.vessels || []);
+        setNavalLoading(!!res.data?.refreshing);
+        setNavalLastChecked(
+          res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : ""
+        );
+      } catch (error) {
+        console.error("Failed to fetch naval vessels:", error);
+      }
+    };
+    fetchNaval();
+    const interval = setInterval(fetchNaval, 20000); // 20s — cheap read, just polls cache status
+    return () => clearInterval(interval);
+  }, [activeLayers.navalVessels]);
+
+  // Wildfires: NASA FIRMS 24h global active-fire feed, server-cached for 1h.
+  // Only poll while the layer is on; 30 min matches the data's real update
+  // cadence closely enough without adding load.
+  useEffect(() => {
+    if (!activeLayers.wildfires) return;
+    const fetchWildfires = async () => {
+      try {
+        setWildfiresLoading(true);
+        const res = await axios.get("/api/wildfires");
+        setWildfires(res.data?.fires || []);
+      } catch (error) {
+        console.error("Failed to fetch wildfires:", error);
+      } finally {
+        setWildfiresLoading(false);
+      }
+    };
+    fetchWildfires();
+    const interval = setInterval(fetchWildfires, 30 * 60 * 1000); // 30 min
+    return () => clearInterval(interval);
+  }, [activeLayers.wildfires]);
+
+  // Storms: NOAA NHC active tropical cyclones (Atlantic + E/C Pacific only —
+  // not global). Server-cached 15 min; poll at the same cadence.
+  useEffect(() => {
+    if (!activeLayers.storms) return;
+    const fetchStorms = async () => {
+      try {
+        setStormsLoading(true);
+        const res = await axios.get("/api/storms");
+        setStorms(res.data?.storms || []);
+      } catch (error) {
+        console.error("Failed to fetch storms:", error);
+      } finally {
+        setStormsLoading(false);
+      }
+    };
+    fetchStorms();
+    const interval = setInterval(fetchStorms, 15 * 60 * 1000); // 15 min
+    return () => clearInterval(interval);
+  }, [activeLayers.storms]);
 
   // Client-side filter by active categories
   const events = allEvents.filter((e) => activeCategories.includes(e.category));
@@ -340,6 +465,12 @@ export default function Dashboard() {
                     ["tradeRoutes", "Trade Routes"],
                     ["conflictZones", "Conflict Zones"],
                     ["ports", "Ports"],
+                    ["navalVessels", "Naval Vessels"],
+                    ["cables", "Submarine Cables"],
+                    ["pipelines", "Oil & Gas Pipelines"],
+                    ["militaryBases", "Military Bases"],
+                    ["wildfires", "Wildfires"],
+                    ["storms", "Storms"],
                   ] as [MapLayerKey, string][]
                 ).map(([key, label]) => (
                   <button
@@ -352,9 +483,38 @@ export default function Dashboard() {
                     }`}
                   >
                     <span>{label}</span>
-                    <span>{activeLayers[key] ? "ON" : "OFF"}</span>
+                    <span>
+                      {key === "navalVessels" && activeLayers.navalVessels
+                        ? navalLoading
+                          ? "SCANNING…"
+                          : `ON (${navalVessels.length})`
+                        : key === "wildfires" && activeLayers.wildfires
+                        ? wildfiresLoading && wildfires.length === 0
+                          ? "LOADING…"
+                          : `ON (${wildfires.length})`
+                        : key === "storms" && activeLayers.storms
+                        ? stormsLoading && storms.length === 0
+                          ? "LOADING…"
+                          : `ON (${storms.length})`
+                        : activeLayers[key]
+                        ? "ON"
+                        : "OFF"}
+                    </span>
                   </button>
                 ))}
+                {activeLayers.navalVessels && (
+                  <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
+                    AIS scan takes ~90s per refresh (every 30 min). Military-flagged
+                    vessels are rare — 0 results on a given scan is expected.
+                    {navalLastChecked && ` Last checked: ${navalLastChecked}.`}
+                  </p>
+                )}
+                {activeLayers.storms && (
+                  <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
+                    Covers Atlantic + Eastern/Central Pacific only (NOAA NHC) — not
+                    global.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -365,6 +525,9 @@ export default function Dashboard() {
             onSelectEvent={handleEventSelect}
             activeLayers={activeLayers}
             layerData={layerData}
+            navalVessels={activeLayers.navalVessels ? navalVessels : []}
+            wildfires={activeLayers.wildfires ? wildfires : []}
+            storms={activeLayers.storms ? storms : []}
             onSelectConflictZone={setSelectedConflictZone}
             mobileVisible={mobileView === "map"}
           />
