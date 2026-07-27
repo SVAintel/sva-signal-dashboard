@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
@@ -54,6 +54,55 @@ export default function Dashboard() {
     conflictZones: false,
     ports: false,
   });
+
+  // Resizable panel state — sidebar width (drag divider between sidebar/map)
+  // and live-feed height (drag divider between signals list and broadcasts).
+  const [sidebarWidth, setSidebarWidth] = useState(420);
+  const [liveFeedHeight, setLiveFeedHeight] = useState(260);
+  const dragStateRef = useRef<{ type: "sidebar" | "liveFeed"; startPos: number; startSize: number } | null>(null);
+
+  const handleDragMove = useCallback((e: MouseEvent) => {
+    const drag = dragStateRef.current;
+    if (!drag) return;
+    if (drag.type === "sidebar") {
+      const delta = e.clientX - drag.startPos;
+      const next = Math.min(720, Math.max(300, drag.startSize + delta));
+      setSidebarWidth(next);
+    } else {
+      // Live feed divider: dragging up (negative delta) grows the feed since it sits at the bottom.
+      const delta = drag.startPos - e.clientY;
+      const next = Math.min(600, Math.max(140, drag.startSize + delta));
+      setLiveFeedHeight(next);
+    }
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    dragStateRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", handleDragMove);
+    window.removeEventListener("mouseup", handleDragEnd);
+  }, [handleDragMove]);
+
+  const startDrag = (type: "sidebar" | "liveFeed") => (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStateRef.current = {
+      type,
+      startPos: type === "sidebar" ? e.clientX : e.clientY,
+      startSize: type === "sidebar" ? sidebarWidth : liveFeedHeight,
+    };
+    document.body.style.cursor = type === "sidebar" ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleDragMove);
+    window.addEventListener("mouseup", handleDragEnd);
+  };
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener("mousemove", handleDragMove);
+      window.removeEventListener("mouseup", handleDragEnd);
+    };
+  }, [handleDragMove, handleDragEnd]);
 
   const fetchEvents = async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -191,7 +240,8 @@ export default function Dashboard() {
       <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
         {/* Sidebar with Tabs - on LEFT (desktop) / toggled full-screen panel (mobile) */}
         <div
-          className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] md:flex md:w-[420px] ${
+          style={{ ["--sidebar-w" as any]: `${sidebarWidth}px` }}
+          className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] md:flex md:w-[var(--sidebar-w)] md:shrink-0 ${
             mobileView === "panel" ? "flex" : "hidden"
           }`}
         >
@@ -228,9 +278,15 @@ export default function Dashboard() {
                     selectedEvent={selectedEvent}
                   />
                 </div>
-                {/* Live feed — natural height (16:9 video + controls), no black bars */}
-                <div className="shrink-0">
-                  <LiveBroadcasts />
+                {/* Drag handle to resize the live feed panel height (desktop only — mobile keeps natural height) */}
+                <div
+                  onMouseDown={startDrag("liveFeed")}
+                  className="hidden md:block h-1.5 shrink-0 cursor-row-resize bg-[#1e1e1e] hover:bg-[#d4b36a]/40 transition"
+                  title="Drag to resize live feed"
+                />
+                {/* Live feed — explicit resizable height on desktop, natural height on mobile */}
+                <div className="shrink-0 overflow-y-auto md:block" style={{ maxHeight: liveFeedHeight + 160 }}>
+                  <LiveBroadcasts videoHeight={liveFeedHeight} />
                 </div>
               </>
             )}
@@ -239,6 +295,13 @@ export default function Dashboard() {
             {activeTab === "analyst" && <AIAnalystPanel events={events} />}
           </div>
         </div>
+
+        {/* Drag handle to resize the sidebar width (desktop only) */}
+        <div
+          onMouseDown={startDrag("sidebar")}
+          className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-[#1e1e1e] hover:bg-[#d4b36a]/40 transition"
+          title="Drag to resize panel"
+        />
 
         {/* Map - on RIGHT (desktop) / toggled full-screen panel (mobile) */}
         <div className={`relative flex-1 md:block ${mobileView === "map" ? "block" : "hidden"}`}>
