@@ -1,5 +1,8 @@
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   if (!NEWS_API_KEY) {
     return Response.json([]);

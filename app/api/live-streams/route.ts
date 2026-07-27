@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
+export const dynamic = "force-dynamic";
+
 const CHANNELS = [
   { name: "Al Jazeera", channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg", region: "GLOBAL" },
   { name: "DW News",    channelId: "UCknLrEdhRCp1aegoMqRaCZg", region: "EUROPE" },

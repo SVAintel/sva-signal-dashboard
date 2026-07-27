@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { CONFLICTS } from "@/lib/conflict-data";
 
+export const dynamic = "force-dynamic";
+
 const SHIPPING_LANES_URL =
   "https://raw.githubusercontent.com/newzealandpaul/Shipping-Lanes/main/data/Shipping_Lanes_v1.geojson";
 const PORTS_URL =
