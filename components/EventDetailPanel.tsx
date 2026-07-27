@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Event } from "@/lib/types";
 import { X } from "lucide-react";
 
@@ -8,7 +9,68 @@ interface EventDetailPanelProps {
   onClose: () => void;
 }
 
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export default function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!event) {
+      setChatMessages([]);
+      return;
+    }
+    setChatMessages([
+      {
+        role: "assistant",
+        content: "Ask me anything about this event. I can explain context, likely implications, and what to monitor next.",
+      },
+    ]);
+    setChatInput("");
+    setChatError(null);
+    setChatLoading(false);
+  }, [event?.id]);
+
+  const sendChatMessage = async () => {
+    if (!event) return;
+    const trimmed = chatInput.trim();
+    if (!trimmed || chatLoading) return;
+
+    const nextMessages: ChatMessage[] = [...chatMessages, { role: "user", content: trimmed }];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatError(null);
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event,
+          messages: nextMessages,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "AI request failed");
+      }
+
+      setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply || "No response." }]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI request failed";
+      setChatError(message);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   if (!event) return null;
 
   const analystNotes = generateAnalystNotes(event);
@@ -94,6 +156,55 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
                   </a>
                 ))}
               </div>
+            </div>
+
+            <div className="rounded border border-[#1e3a5f] bg-[#0f172a] p-4">
+              <h2 className="mb-3 text-sm font-bold uppercase text-cyan-400">Event AI Q&A</h2>
+
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#1e3a5f] bg-[#0b1224] p-3">
+                {chatMessages.map((msg, idx) => (
+                  <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-cyan-300"}`}>
+                    <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">
+                      {msg.role === "assistant" ? "AI" : "You"}
+                    </span>
+                    <span>{msg.content}</span>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div className="text-xs text-slate-500">
+                    <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">AI</span>
+                    Thinking...
+                  </div>
+                )}
+              </div>
+
+              {chatError && <p className="mt-2 text-[11px] text-red-400">{chatError}</p>}
+
+              <form
+                className="mt-3 flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  sendChatMessage();
+                }}
+              >
+                <input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask about this event..."
+                  className="flex-1 rounded border border-[#1e3a5f] bg-[#081021] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={chatLoading || !chatInput.trim()}
+                  className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
+                    chatLoading || !chatInput.trim()
+                      ? "cursor-not-allowed border-slate-700 text-slate-600"
+                      : "border-cyan-600 text-cyan-400 hover:bg-cyan-900/30"
+                  }`}
+                >
+                  {chatLoading ? "Thinking..." : "Ask"}
+                </button>
+              </form>
             </div>
 
             <div className="pt-4 border-t border-[#1e3a5f]">
