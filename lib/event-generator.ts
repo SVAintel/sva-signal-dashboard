@@ -176,11 +176,11 @@ async function fetchNewsAPIEvents() {
     // We fetch two passes: world headlines + specific threat keywords
     const [headlinesRes, everythingRes] = await Promise.all([
       fetch(
-        `https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
+        `https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=50&apiKey=${NEWS_API_KEY}`,
         { signal: controller.signal }
       ),
       fetch(
-        `https://newsapi.org/v2/everything?q=attack+OR+airstrike+OR+missile+OR+shooting+OR+explosion+OR+troops+OR+outbreak+OR+cyberattack+OR+nuclear+OR+coup+OR+arrested+OR+sanctions&sortBy=publishedAt&language=en&pageSize=20&apiKey=${NEWS_API_KEY}`,
+        `https://newsapi.org/v2/everything?q=attack+OR+airstrike+OR+missile+OR+shooting+OR+explosion+OR+troops+OR+outbreak+OR+cyberattack+OR+nuclear+OR+coup+OR+arrested+OR+sanctions&sortBy=publishedAt&language=en&pageSize=50&apiKey=${NEWS_API_KEY}`,
         { signal: controller.signal }
       ),
     ]);
@@ -255,7 +255,7 @@ async function fetchNewsAPIEvents() {
       .reduce((acc: any[], article: any) => {
         const category = categorize(article.title, article.description || "");
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-        if (categoryCounts[category] > 3) return acc; // max 3 per category
+        if (categoryCounts[category] > 5) return acc; // max 5 per category
         acc.push({
           title: article.title,
           description: article.description || "Breaking news",
@@ -320,7 +320,7 @@ async function fetchUSGSEvents() {
     
     const data = await res.json();
     
-    return (data.features || []).slice(0, 2).map((feature: any) => {
+    return (data.features || []).slice(0, 6).map((feature: any) => {
       const mag = feature.properties.mag;
       return {
         title: `Seismic Alert: Magnitude ${mag} earthquake`,
@@ -344,14 +344,14 @@ async function fetchGDELTEvents() {
     const timeout = setTimeout(() => controller.abort(), 5000);
     
     const res = await fetch(
-      "https://api.gdeltproject.org/api/v2/search?query=conflict&mode=artlist&maxrecords=2&format=json",
+      "https://api.gdeltproject.org/api/v2/search?query=conflict&mode=artlist&maxrecords=6&format=json",
       { signal: controller.signal }
     );
     clearTimeout(timeout);
     
     const data = await res.json();
     
-    return (data.articles || []).slice(0, 2).map((article: any) => ({
+    return (data.articles || []).slice(0, 6).map((article: any) => ({
       title: article.title,
       description: article.snippet || "Geopolitical event detected",
       location: geolocateFromText(article.title + " " + (article.snippet || "")),
@@ -445,14 +445,14 @@ async function fetchEMSCEvents() {
     const timeout = setTimeout(() => controller.abort(), 5000);
     
     const res = await fetch(
-      "https://www.emsc-csem.org/api/test/latest?limit=2&start_year=2023",
+      "https://www.emsc-csem.org/api/test/latest?limit=6&start_year=2023",
       { signal: controller.signal }
     );
     clearTimeout(timeout);
     
     const data = await res.json();
     
-    return (data.features || []).slice(0, 2).map((feature: any) => {
+    return (data.features || []).slice(0, 6).map((feature: any) => {
       const mag = feature.properties.magnitude;
       return {
         title: `EMSC Alert: Magnitude ${mag} - ${feature.properties.eventLocationName || "European Mediterranean"}`,
