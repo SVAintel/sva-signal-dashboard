@@ -10,7 +10,7 @@ export async function GET() {
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const res = await fetch(
-      `https://newsapi.org/v2/top-headlines?category=general&sortBy=publishedAt&language=en&pageSize=8&apiKey=${NEWS_API_KEY}`,
+      `https://newsapi.org/v2/top-headlines?category=general&sortBy=publishedAt&language=en&pageSize=30&apiKey=${NEWS_API_KEY}`,
       { signal: controller.signal }
     );
     clearTimeout(timeout);

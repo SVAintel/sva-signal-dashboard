@@ -21,7 +21,7 @@ export default function NewsPanel() {
       try {
         const response = await fetch("/api/news");
         const data = await response.json();
-        setNews(data.slice(0, 8));
+        setNews(data.slice(0, 30));
       } catch (error) {
         console.error("Failed to fetch news:", error);
       } finally {
