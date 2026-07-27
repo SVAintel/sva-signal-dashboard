@@ -364,11 +364,11 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+      <div className="flex flex-1 min-h-0 overflow-hidden flex-col md:flex-row">
         {/* Sidebar with Tabs - on LEFT (desktop) / toggled full-screen panel (mobile) */}
         <div
           style={{ ["--sidebar-w" as any]: `${sidebarWidth}px` }}
-          className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] md:flex md:w-[var(--sidebar-w)] md:shrink-0 ${
+          className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] flex-1 min-h-0 md:flex md:w-[var(--sidebar-w)] md:flex-none md:shrink-0 ${
             mobileView === "panel" ? "flex" : "hidden"
           }`}
         >
@@ -393,7 +393,7 @@ export default function Dashboard() {
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
             {activeTab === "events" && (
               <>
                 {/* Signals — fills remaining space, scrollable */}
