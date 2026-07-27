@@ -35,9 +35,9 @@ export default function NewsPanel() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-[#090506] border-l border-[#3a1d24]">
+    <div className="flex h-full flex-col bg-[#040906] border-l border-[#23503a]">
       {/* Header */}
-      <div className="border-b border-[#3a1d24] bg-[#12090b] px-4 py-3">
+      <div className="border-b border-[#23503a] bg-[#07120d] px-4 py-3">
         <div className="flex items-center gap-2">
           <Newspaper size={16} className="text-[#d4b36a]" />
           <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Live News</h2>
@@ -60,10 +60,10 @@ export default function NewsPanel() {
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block p-2 rounded border border-[#3a1d24] bg-[#140b0f] hover:bg-[#2b171d] transition hover:border-[#d4b36a]/50 group"
+              className="block p-2 rounded border border-[#23503a] bg-[#0a1711] hover:bg-[#1a3a2b] transition hover:border-[#d4b36a]/50 group"
             >
               {item.image && (
-                <div className="mb-2 h-20 w-full overflow-hidden rounded bg-[#3a1d24]">
+                <div className="mb-2 h-20 w-full overflow-hidden rounded bg-[#23503a]">
                   <img
                     src={item.image}
                     alt={item.title}
@@ -88,3 +88,4 @@ export default function NewsPanel() {
     </div>
   );
 }
+

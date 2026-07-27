@@ -37,7 +37,7 @@ export default function EventList({
       <div className="flex-1 p-4">
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-14 animate-pulse rounded border border-[#3a1d24] bg-[#140b0f]" />
+            <div key={i} className="h-14 animate-pulse rounded border border-[#23503a] bg-[#0a1711]" />
           ))}
         </div>
       </div>
@@ -47,7 +47,7 @@ export default function EventList({
   return (
     <div className="flex flex-col">
       {/* Sidebar header */}
-      <div className="border-b border-[#3a1d24] px-4 py-2">
+      <div className="border-b border-[#23503a] px-4 py-2">
         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
           Signal Feed
         </div>
@@ -68,10 +68,10 @@ export default function EventList({
               key={event.id}
               onClick={() => onSelectEvent(event)}
               style={isSelected ? { borderLeftColor: meta.color } : {}}
-              className={`w-full border-b border-[#3a1d24] border-l-2 p-3 text-left transition ${
+              className={`w-full border-b border-[#23503a] border-l-2 p-3 text-left transition ${
                 isSelected
-                  ? "bg-[#1a0f12]"
-                  : "border-l-transparent hover:bg-[#140b0f]"
+                  ? "bg-[#0f2018]"
+                  : "border-l-transparent hover:bg-[#0a1711]"
               }`}
             >
               {/* Category + confidence */}
@@ -113,3 +113,4 @@ export default function EventList({
     </div>
   );
 }
+

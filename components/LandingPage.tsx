@@ -6,7 +6,7 @@ export default function LandingPage() {
   const { setDashboardActive } = useStore();
 
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-[#070304] via-[#100608] to-[#16080b] text-center">
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-[#020703] via-[#061008] to-[#0a160d] text-center">
       {/* Background grid effect */}
       <div className="absolute inset-0 opacity-10 pointer-events-none">
         <div
@@ -34,7 +34,7 @@ export default function LandingPage() {
         <h1 className="mb-4 text-5xl font-bold tracking-tight text-slate-100">
           Sovereign Veil
           <br />
-          <span className="bg-gradient-to-r from-[#d4b36a] to-[#a33a4e] bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-[#d4b36a] to-[#1f5a40] bg-clip-text text-transparent">
             Analytics
           </span>
         </h1>
@@ -57,7 +57,7 @@ export default function LandingPage() {
           className="group relative inline-block px-8 py-3 font-bold uppercase tracking-widest text-black"
         >
           {/* Glow effect */}
-          <div className="absolute inset-0 rounded bg-gradient-to-r from-[#d4b36a] to-[#a33a4e] opacity-0 blur-lg group-hover:opacity-100 transition duration-500" />
+          <div className="absolute inset-0 rounded bg-gradient-to-r from-[#d4b36a] to-[#1f5a40] opacity-0 blur-lg group-hover:opacity-100 transition duration-500" />
           
           {/* Button */}
           <div className="relative rounded border border-[#d4b36a] bg-[#130a0c] px-8 py-3 text-sm font-bold uppercase tracking-widest text-[#d4b36a] transition group-hover:scale-105 group-hover:bg-[#1d0e12]">
@@ -73,8 +73,9 @@ export default function LandingPage() {
       </div>
 
       {/* Decorative elements */}
-      <div className="absolute top-20 left-10 h-40 w-40 rounded-full bg-[#a33a4e]/15 blur-3xl" />
+      <div className="absolute top-20 left-10 h-40 w-40 rounded-full bg-[#1f5a40]/15 blur-3xl" />
       <div className="absolute bottom-20 right-10 h-40 w-40 rounded-full bg-[#d4b36a]/10 blur-3xl" />
     </div>
   );
 }
+

@@ -84,9 +84,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-[#090506] text-slate-200">
+    <div className="flex h-screen flex-col bg-[#040906] text-slate-200">
       {/* Top Bar */}
-      <header className="flex items-center justify-between border-b border-[#3a1d24] bg-[#12090b] px-6 py-2">
+      <header className="flex items-center justify-between border-b border-[#23503a] bg-[#07120d] px-6 py-2">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 animate-pulse rounded-full bg-[#d4b36a]" />
@@ -104,7 +104,7 @@ export default function Dashboard() {
             onClick={() => setAllCategories(allOn ? [] : ALL_CATEGORIES)}
             className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
               allOn
-                ? "border-[#d4b36a] text-[#d4b36a] bg-[#1a0f12]"
+                ? "border-[#d4b36a] text-[#d4b36a] bg-[#0f2018]"
                 : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
             }`}
           >
@@ -121,7 +121,7 @@ export default function Dashboard() {
                 title={meta.tooltip}
                 style={isOn ? { borderColor: meta.color, color: meta.color } : {}}
                 className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
-                  isOn ? "bg-[#1a0f12]" : "border-slate-700 text-slate-400 opacity-40 hover:opacity-70"
+                  isOn ? "bg-[#0f2018]" : "border-slate-700 text-slate-400 opacity-40 hover:opacity-70"
                 }`}
               >
                 {meta.label}
@@ -137,16 +137,16 @@ export default function Dashboard() {
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar with Tabs - on LEFT */}
-        <div className="w-[420px] flex flex-col bg-[#12090b] border-r border-[#3a1d24]">
+        <div className="w-[420px] flex flex-col bg-[#07120d] border-r border-[#23503a]">
           {/* Tab Buttons */}
-          <div className="flex border-b border-[#3a1d24] bg-[#1a0f12]">
+          <div className="flex border-b border-[#23503a] bg-[#0f2018]">
             {(["events", "news", "stocks", "analyst"] as SidebarTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
                   activeTab === tab
-                    ? "border-[#d4b36a] text-[#d4b36a] bg-[#271319]"
+                    ? "border-[#d4b36a] text-[#d4b36a] bg-[#163025]"
                     : "border-transparent text-slate-500 hover:text-slate-300"
                 }`}
               >
@@ -186,7 +186,7 @@ export default function Dashboard() {
         {/* Map - on RIGHT, fills remaining space */}
         <div className="relative flex-1">
           {/* Map legend */}
-          <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#3a1d24] bg-[#12090bcc] px-3 py-2 text-[10px] backdrop-blur">
+          <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-3 py-2 text-[10px] backdrop-blur">
             {Object.entries(categoryLabels).map(([key, val]) => (
               <div key={key} className="flex items-center gap-2 py-0.5">
                 <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
@@ -196,7 +196,7 @@ export default function Dashboard() {
           </div>
 
           {/* Event count badge */}
-          <div className="absolute right-4 top-4 z-[999] rounded border border-[#3a1d24] bg-[#12090bcc] px-3 py-1 text-[10px] backdrop-blur">
+          <div className="absolute right-4 top-4 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-3 py-1 text-[10px] backdrop-blur">
             <span className="font-bold text-[#d4b36a]">{events.length}</span>
             <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
           </div>
@@ -217,3 +217,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

@@ -62,9 +62,9 @@ export default function LiveBroadcasts() {
   const current = channels[active];
 
   return (
-    <div className="flex flex-col border-t border-[#3a1d24]">
+    <div className="flex flex-col border-t border-[#23503a]">
       {/* Channel selector */}
-      <div className="border-b border-[#3a1d24] px-4 py-2">
+      <div className="border-b border-[#23503a] px-4 py-2">
         <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
           Live Broadcasts
         </div>
@@ -79,7 +79,7 @@ export default function LiveBroadcasts() {
                 style={active === i ? { borderColor: color, color } : {}}
                 className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest transition ${
                   active === i
-                    ? "bg-[#1a0f12]"
+                    ? "bg-[#0f2018]"
                     : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
                 } ${!isLive ? "opacity-40" : ""}`}
               >
@@ -111,7 +111,7 @@ export default function LiveBroadcasts() {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-[#3a1d24] px-4 py-1 flex items-center gap-2">
+      <div className="border-t border-[#23503a] px-4 py-1 flex items-center gap-2">
         <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
         <span className="text-[9px] font-bold uppercase tracking-widest text-red-400">Live</span>
         <span className="text-[9px] text-slate-600">•</span>
@@ -120,3 +120,4 @@ export default function LiveBroadcasts() {
     </div>
   );
 }
+
