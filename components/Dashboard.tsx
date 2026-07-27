@@ -6,6 +6,7 @@ import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
 import LiveBroadcasts from "./LiveBroadcasts";
+import AmbientAudio from "./AmbientAudio";
 import EventDetailPanel from "./EventDetailPanel";
 import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import AIAnalystPanel from "./AIAnalystPanel";
@@ -216,6 +217,7 @@ export default function Dashboard() {
           <span className="ml-2 hidden shrink-0 text-[10px] text-slate-600 sm:inline whitespace-nowrap">
             UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
           </span>
+          <AmbientAudio />
         </div>
       </header>
 
