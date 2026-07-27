@@ -92,36 +92,30 @@ export default function LiveBroadcasts() {
         </div>
       </div>
 
-      {/* Embed or unavailable — 16:9 aspect ratio, no black bars */}
+      {/* Embed — use direct videoId if found, else channel live_stream fallback */}
       <div className="w-full bg-black" style={{ aspectRatio: "16/9" }}>
-        {current?.videoId ? (
+        {current && (
           <iframe
-            key={current.videoId}
-            src={`https://www.youtube.com/embed/${current.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`}
+            key={current.videoId ?? current.channelId}
+            src={
+              current.videoId
+                ? `https://www.youtube.com/embed/${current.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`
+                : `https://www.youtube.com/embed/live_stream?channel=${current.channelId}&autoplay=1&mute=1&modestbranding=1&rel=0`
+            }
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="h-full w-full border-0"
             title={`${current.name} Live`}
           />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-[11px] text-slate-600 uppercase tracking-widest">No live stream found for {current?.name}</p>
-          </div>
         )}
       </div>
 
       {/* Footer */}
       <div className="border-t border-[#1e3a5f] px-4 py-1 flex items-center gap-2">
-        {current?.videoId ? (
-          <>
-            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-            <span className="text-[9px] font-bold uppercase tracking-widest text-red-400">Live</span>
-            <span className="text-[9px] text-slate-600">•</span>
-            <span className="text-[9px] text-slate-500">{current?.name}</span>
-          </>
-        ) : (
-          <span className="text-[9px] text-slate-600 uppercase tracking-widest">Stream unavailable</span>
-        )}
+        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+        <span className="text-[9px] font-bold uppercase tracking-widest text-red-400">Live</span>
+        <span className="text-[9px] text-slate-600">•</span>
+        <span className="text-[9px] text-slate-500">{current?.name}</span>
       </div>
     </div>
   );
