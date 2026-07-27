@@ -50,9 +50,9 @@ export default function Dashboard() {
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
   const [activeLayers, setActiveLayers] = useState({
-    tradeRoutes: true,
-    conflictZones: true,
-    ports: true,
+    tradeRoutes: false,
+    conflictZones: false,
+    ports: false,
   });
 
   const fetchEvents = async (manual = false) => {
@@ -146,11 +146,14 @@ export default function Dashboard() {
           {/* Per-category toggles */}
           {ALL_CATEGORIES.map((cat) => {
             const meta = categoryLabels[cat];
-            const isOn = activeCategories.includes(cat);
+            // While every category is active (default state), none show as individually
+            // highlighted — only the ALL button reflects that. The first click on a
+            // category exclusively selects it; further clicks multi-select from there.
+            const isOn = !allOn && activeCategories.includes(cat);
             return (
               <button
                 key={cat}
-                onClick={() => toggleCategory(cat)}
+                onClick={() => (allOn ? setAllCategories([cat]) : toggleCategory(cat))}
                 title={meta.tooltip}
                 style={isOn ? { borderColor: meta.color, color: meta.color } : {}}
                 className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
