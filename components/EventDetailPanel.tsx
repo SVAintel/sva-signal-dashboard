@@ -81,8 +81,8 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
       <div className="fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm" onClick={onClose} />
       
       <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
-        <div className="pointer-events-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded border border-[#d4b36a]/30 bg-[#07120d] shadow-2xl">
-          <div className="sticky top-0 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#08120d] px-6 py-4">
+        <div className="pointer-events-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded border border-[#d4b36a]/30 bg-[#0e0e0e] shadow-2xl">
+          <div className="sticky top-0 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#0f0f0f] px-6 py-4">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
                 <div className="h-3 w-3 rounded-full" style={{ background: categoryColor, boxShadow: `0 0 8px ${categoryColor}` }} />
@@ -92,13 +92,13 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
               </div>
               <h1 className="text-xl font-bold text-slate-100">{event.title}</h1>
             </div>
-            <button onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-[#163025] hover:text-[#d4b36a] transition">
+            <button onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-[#262626] hover:text-[#d4b36a] transition">
               <X size={20} />
             </button>
           </div>
 
           <div className="p-6 space-y-6">
-            <div className="grid grid-cols-3 gap-4 pb-4 border-b border-[#23503a]">
+            <div className="grid grid-cols-3 gap-4 pb-4 border-b border-[#3a3a3a]">
               <div>
                 <p className="text-xs text-slate-600 uppercase font-semibold">Location</p>
                 <p className="text-sm text-slate-200 mt-1">{event.location.lat.toFixed(2)}°, {event.location.lng.toFixed(2)}°</p>
@@ -118,7 +118,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
               <p className="text-sm leading-relaxed text-slate-300">{event.description}</p>
             </div>
 
-            <div className="bg-[#0a1711] rounded border border-[#23503a] p-4">
+            <div className="bg-[#111111] rounded border border-[#3a3a3a] p-4">
               <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3 flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
                 Analyst Assessment
@@ -127,7 +127,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
                 {analystNotes.paragraphs.map((para, idx) => <p key={idx}>{para}</p>)}
               </div>
 
-              <div className="mt-4 pt-4 border-t border-[#23503a]">
+              <div className="mt-4 pt-4 border-t border-[#3a3a3a]">
                 <h3 className="text-xs font-bold uppercase text-slate-400 mb-2">Watch for developments:</h3>
                 <ul className="space-y-2">
                   {analystNotes.watchPoints.map((point, idx) => (
@@ -140,10 +140,10 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
               </div>
             </div>
 
-            <div className="rounded border border-[#23503a] bg-[#0a1711] p-4">
+            <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
               <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Event AI Q&A</h2>
 
-              <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#23503a] bg-[#08120d] p-3">
+              <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
                 {chatMessages.map((msg, idx) => (
                   <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
                     <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">
@@ -173,7 +173,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Ask about this event..."
-                  className="flex-1 rounded border border-[#23503a] bg-[#060e0a] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
+                  className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
                 />
                 <button
                   type="submit"
@@ -181,7 +181,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
                   className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
                     chatLoading || !chatInput.trim()
                       ? "cursor-not-allowed border-slate-700 text-slate-600"
-                      : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#1a3a2b]"
+                      : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
                   }`}
                 >
                   {chatLoading ? "Thinking..." : "Ask"}
@@ -192,13 +192,13 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
             <div>
               <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
               <div className="space-y-2">
-                <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#23503a] bg-[#0a1711] p-3 text-sm text-[#d4b36a] hover:bg-[#1a3a2b] hover:border-[#d4b36a]/50 transition">
+                <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
                   <span className="text-xs font-mono">{event.source}</span>
                   <span className="flex-1 truncate text-slate-400">{event.title}</span>
                   <span className="text-xs">→</span>
                 </a>
                 {analystNotes.additionalSources.map((src, idx) => (
-                  <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#23503a] bg-[#0a1711] p-3 text-sm text-slate-400 hover:text-[#d4b36a] hover:bg-[#1a3a2b] hover:border-[#d4b36a]/50 transition">
+                  <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-slate-400 hover:text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
                     <span className="text-xs">{src.name}</span>
                     <span className="flex-1 truncate text-slate-500">{src.title}</span>
                     <span className="text-xs">→</span>
@@ -207,7 +207,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
               </div>
             </div>
 
-            <div className="pt-4 border-t border-[#23503a]">
+            <div className="pt-4 border-t border-[#3a3a3a]">
               <p className="text-[10px] text-slate-600 italic">* Analyst assessment generated from available data sources. Confidence levels reflect data quality. Verify with primary sources before action.</p>
             </div>
           </div>

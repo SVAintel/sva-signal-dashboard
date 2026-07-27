@@ -10,7 +10,10 @@ import { useEffect } from "react";
 const makeIcon = (color: string) =>
   new L.DivIcon({
     className: "",
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${color};"></div>`,
+    html: `<div style="position:relative;width:14px;height:14px;">
+      <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${color};"></div>
+      <div style="position:relative;width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${color};"></div>
+    </div>`,
     iconSize: [14, 14],
     iconAnchor: [7, 7],
   });
@@ -193,7 +196,7 @@ export default function WorldMap({
       maxZoom={8}
       maxBounds={worldBounds}
       maxBoundsViscosity={1.0}
-      style={{ height: "100%", width: "100%", background: "#040906" }}
+      style={{ height: "100%", width: "100%", background: "#0a0a0a" }}
       zoomControl={false}
     >
       <MapFitter visible={mobileVisible} />
@@ -260,7 +263,7 @@ export default function WorldMap({
           icon={icons[event.category] || icons.war}
         >
           <Popup className="tactical-popup">
-            <div style={{ background: "#0a1711", border: "1px solid #23503a", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+            <div style={{ background: "#111111", border: "1px solid #3a3a3a", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
               <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
                 {event.category.replace(/_/g, " ")}
               </div>
@@ -271,8 +274,8 @@ export default function WorldMap({
                 style={{
                   marginTop: "8px",
                   width: "100%",
-                  border: "1px solid #23503a",
-                  background: "#0f2018",
+                  border: "1px solid #3a3a3a",
+                  background: "#1e1e1e",
                   color: "#d4b36a",
                   borderRadius: "4px",
                   fontSize: "10px",

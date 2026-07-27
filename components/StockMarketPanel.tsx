@@ -40,9 +40,9 @@ export default function StockMarketPanel() {
   const changePercent = firstPrice ? ((change / firstPrice) * 100).toFixed(2) : "0.00";
 
   return (
-    <div className="flex h-full flex-col bg-[#040906] border-l border-[#23503a]">
+    <div className="flex h-full flex-col bg-[#0a0a0a] border-l border-[#3a3a3a]">
       {/* Header */}
-      <div className="border-b border-[#23503a] bg-[#07120d] px-4 py-3">
+      <div className="border-b border-[#3a3a3a] bg-[#0e0e0e] px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-[#d4b36a]" />
@@ -64,8 +64,8 @@ export default function StockMarketPanel() {
               onClick={() => setSelectedSymbol(sym)}
               className={`text-[10px] px-2 py-1 rounded transition ${
                 selectedSymbol === sym
-                  ? "bg-[#d4b36a] text-[#07120d] font-bold"
-                  : "bg-[#14261b] text-slate-300 hover:bg-[#23503a]"
+                  ? "bg-[#d4b36a] text-[#0e0e0e] font-bold"
+                  : "bg-[#1f1f1f] text-slate-300 hover:bg-[#3a3a3a]"
               }`}
             >
               {sym}
@@ -83,7 +83,7 @@ export default function StockMarketPanel() {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#23503a" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#3a3a3a" vertical={false} />
               <XAxis
                 dataKey="time"
                 stroke="#64748b"
@@ -93,8 +93,8 @@ export default function StockMarketPanel() {
               <YAxis stroke="#64748b" style={{ fontSize: "10px" }} tick={{ fill: "#94a3b8" }} />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#0a1711",
-                  border: "1px solid #23503a",
+                  backgroundColor: "#111111",
+                  border: "1px solid #3a3a3a",
                   borderRadius: "4px",
                   fontSize: "11px",
                 }}

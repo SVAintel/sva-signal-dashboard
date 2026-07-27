@@ -7,6 +7,51 @@ html {
 }
 
 body {
-  @apply bg-[#040906] text-slate-50;
+  @apply bg-[#0a0a0a] text-slate-50;
+}
+
+/* Themed scrollbars (WebKit + Firefox) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #0a0a0a;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #3a3a3a;
+  border-radius: 6px;
+  border: 2px solid #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #d4b36a;
+}
+
+/* Pulsing event marker animation */
+@keyframes marker-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.75;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.marker-pulse-ring {
+  animation: marker-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 

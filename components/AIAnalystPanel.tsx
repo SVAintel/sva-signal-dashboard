@@ -80,7 +80,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
         <span className="text-[10px] text-slate-500">{events.length} active signals</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded border border-[#23503a] bg-[#08120d] p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3 space-y-2">
         {messages.map((msg, idx) => (
           <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
             <span className="mr-2 text-[10px] font-bold uppercase tracking-widest">
@@ -110,7 +110,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the analyst..."
-          className="flex-1 rounded border border-[#23503a] bg-[#060e0a] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
+          className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
         />
         <button
           type="submit"
@@ -118,7 +118,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
           className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
             loading || !input.trim()
               ? "cursor-not-allowed border-slate-700 text-slate-600"
-              : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#1a3a2b]"
+              : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
           }`}
         >
           {loading ? "Thinking..." : "Ask"}
