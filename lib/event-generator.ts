@@ -3,6 +3,108 @@ import { Event } from "@/lib/types";
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
 
+// Geocode by scanning article text for known place names.
+// Returns best match or a random plausible land coordinate as fallback.
+const GEO_LOOKUP: Array<{ names: string[]; lat: number; lng: number }> = [
+  // Middle East
+  { names: ["ukraine", "kyiv", "kiev", "kharkiv", "odessa", "zaporizhzhia"], lat: 49.0, lng: 31.5 },
+  { names: ["russia", "moscow", "kremlin", "russian"], lat: 61.0, lng: 60.0 },
+  { names: ["israel", "tel aviv", "jerusalem", "gaza", "west bank", "hamas", "idf", "netanyahu"], lat: 31.5, lng: 34.8 },
+  { names: ["iran", "tehran", "iranian", "irgc"], lat: 32.0, lng: 53.0 },
+  { names: ["iraq", "baghdad", "iraqi", "mosul", "erbil"], lat: 33.0, lng: 44.0 },
+  { names: ["syria", "damascus", "aleppo", "syrian"], lat: 34.8, lng: 38.9 },
+  { names: ["lebanon", "beirut", "hezbollah"], lat: 33.9, lng: 35.5 },
+  { names: ["saudi arabia", "riyadh", "saudi"], lat: 24.0, lng: 45.0 },
+  { names: ["yemen", "sanaa", "houthi"], lat: 15.5, lng: 48.0 },
+  { names: ["turkey", "ankara", "istanbul", "erdogan", "turkish"], lat: 39.0, lng: 35.0 },
+  { names: ["egypt", "cairo", "egyptian"], lat: 26.0, lng: 30.0 },
+  { names: ["jordan", "amman", "jordanian"], lat: 31.0, lng: 36.0 },
+  { names: ["afghanistan", "kabul", "taliban"], lat: 33.0, lng: 65.0 },
+  { names: ["pakistan", "islamabad", "karachi", "lahore", "pakistani"], lat: 30.0, lng: 69.0 },
+  // Africa
+  { names: ["sudan", "khartoum", "sudanese", "darfur"], lat: 15.0, lng: 30.0 },
+  { names: ["ethiopia", "addis ababa", "ethiopian", "tigray"], lat: 9.0, lng: 40.5 },
+  { names: ["somalia", "mogadishu", "somali", "al-shabaab"], lat: 5.0, lng: 46.0 },
+  { names: ["nigeria", "abuja", "lagos", "boko haram"], lat: 9.0, lng: 8.0 },
+  { names: ["mali", "bamako", "malian", "sahel"], lat: 17.0, lng: -4.0 },
+  { names: ["congo", "drc", "kinshasa", "m23"], lat: -4.0, lng: 24.0 },
+  { names: ["kenya", "nairobi", "kenyan"], lat: -1.0, lng: 37.5 },
+  { names: ["south africa", "johannesburg", "cape town"], lat: -29.0, lng: 25.0 },
+  { names: ["libya", "tripoli", "benghazi", "libyan"], lat: 27.0, lng: 18.0 },
+  { names: ["mozambique", "maputo"], lat: -18.0, lng: 35.0 },
+  { names: ["burkina faso", "ouagadougou"], lat: 12.0, lng: -1.5 },
+  // Asia Pacific
+  { names: ["china", "beijing", "shanghai", "xi jinping", "chinese", "prc", "ccp"], lat: 35.0, lng: 105.0 },
+  { names: ["north korea", "pyongyang", "kim jong", "dprk", "icbm"], lat: 40.0, lng: 127.0 },
+  { names: ["south korea", "seoul", "korean"], lat: 37.0, lng: 127.5 },
+  { names: ["taiwan", "taipei"], lat: 23.5, lng: 121.0 },
+  { names: ["india", "new delhi", "delhi", "mumbai", "modi", "indian"], lat: 20.0, lng: 78.0 },
+  { names: ["myanmar", "burma", "yangon", "junta"], lat: 17.0, lng: 96.0 },
+  { names: ["bangladesh", "dhaka"], lat: 23.7, lng: 90.4 },
+  { names: ["japan", "tokyo", "osaka", "japanese"], lat: 36.0, lng: 138.0 },
+  { names: ["indonesia", "jakarta", "indonesian"], lat: -5.0, lng: 120.0 },
+  { names: ["philippines", "manila", "philippine"], lat: 12.0, lng: 122.0 },
+  { names: ["thailand", "bangkok", "thai"], lat: 15.0, lng: 101.0 },
+  { names: ["vietnam", "hanoi", "ho chi minh"], lat: 16.0, lng: 107.0 },
+  // Europe
+  { names: ["france", "paris", "french", "macron"], lat: 46.0, lng: 2.0 },
+  { names: ["germany", "berlin", "german", "bundeswehr"], lat: 51.0, lng: 10.0 },
+  { names: ["uk", "united kingdom", "london", "britain", "british", "boris", "sunak"], lat: 52.5, lng: -1.5 },
+  { names: ["poland", "warsaw", "polish"], lat: 52.0, lng: 20.0 },
+  { names: ["hungary", "budapest", "orban"], lat: 47.0, lng: 19.0 },
+  { names: ["serbia", "belgrade", "serbian"], lat: 44.0, lng: 21.0 },
+  { names: ["romania", "bucharest"], lat: 45.9, lng: 24.9 },
+  { names: ["spain", "madrid", "barcelona", "spanish"], lat: 40.0, lng: -4.0 },
+  { names: ["italy", "rome", "milan", "italian"], lat: 42.5, lng: 12.5 },
+  { names: ["greece", "athens", "greek"], lat: 39.0, lng: 22.0 },
+  { names: ["sweden", "stockholm", "swedish"], lat: 60.0, lng: 15.0 },
+  { names: ["finland", "helsinki", "finnish"], lat: 64.0, lng: 26.0 },
+  { names: ["belarus", "minsk", "lukashenko"], lat: 53.7, lng: 27.9 },
+  // Americas
+  { names: ["united states", "washington", "pentagon", "white house", "u.s.", "us congress", "biden", "trump", "america"], lat: 38.0, lng: -97.0 },
+  { names: ["mexico", "mexico city", "cartel", "mexican"], lat: 23.0, lng: -102.0 },
+  { names: ["colombia", "bogota", "colombian", "farc"], lat: 4.0, lng: -72.0 },
+  { names: ["venezuela", "caracas", "maduro"], lat: 8.0, lng: -66.0 },
+  { names: ["brazil", "brasilia", "rio", "lula", "brazilian"], lat: -10.0, lng: -55.0 },
+  { names: ["haiti", "port-au-prince", "haitian"], lat: 19.0, lng: -72.0 },
+  { names: ["cuba", "havana", "cuban"], lat: 22.0, lng: -79.0 },
+  { names: ["ecuador", "quito"], lat: -2.0, lng: -77.5 },
+  { names: ["peru", "lima"], lat: -10.0, lng: -75.0 },
+  { names: ["chile", "santiago"], lat: -35.0, lng: -71.0 },
+  { names: ["argentina", "buenos aires"], lat: -34.0, lng: -64.0 },
+  { names: ["canada", "ottawa", "toronto"], lat: 56.0, lng: -96.0 },
+];
+
+// Random land-biased fallback (Eurasia/Africa band)
+const LAND_FALLBACKS = [
+  { lat: 48.0, lng: 15.0 },  // Central Europe
+  { lat: 30.0, lng: 35.0 },  // Middle East
+  { lat: 15.0, lng: 20.0 },  // Sahel
+  { lat: 28.0, lng: 77.0 },  // South Asia
+  { lat: 35.0, lng: 105.0 }, // East Asia
+  { lat: -5.0, lng: 25.0 },  // Central Africa
+  { lat: 10.0, lng: -5.0 },  // West Africa
+  { lat: 38.0, lng: -97.0 }, // USA
+  { lat: -15.0, lng: -55.0 },// Brazil
+  { lat: 55.0, lng: 37.0 },  // Russia/Moscow
+];
+
+function geolocateFromText(text: string): { lat: number; lng: number } {
+  const lower = text.toLowerCase();
+  for (const entry of GEO_LOOKUP) {
+    if (entry.names.some(name => lower.includes(name))) {
+      // Add small jitter so overlapping events don't stack exactly
+      return {
+        lat: entry.lat + (Math.random() - 0.5) * 2,
+        lng: entry.lng + (Math.random() - 0.5) * 2,
+      };
+    }
+  }
+  // No match — pick a random land fallback instead of open ocean
+  const fb = LAND_FALLBACKS[Math.floor(Math.random() * LAND_FALLBACKS.length)];
+  return { lat: fb.lat + (Math.random() - 0.5) * 4, lng: fb.lng + (Math.random() - 0.5) * 4 };
+}
+
 // Fetch events from all real APIs with timeout
 export async function generateMockEvents(): Promise<Event[]> {
   const events: Event[] = [];
@@ -121,7 +223,7 @@ async function fetchNewsAPIEvents() {
         acc.push({
           title: article.title,
           description: article.description || article.content || "Breaking news",
-          location: { lat: 20 + Math.random() * 40, lng: -30 + Math.random() * 120 },
+          location: geolocateFromText(article.title + " " + (article.description || "") + " " + (article.source?.name || "")),
           source: "NewsAPI",
           category,
           timestamp: new Date(article.publishedAt).toISOString(),
@@ -216,7 +318,7 @@ async function fetchGDELTEvents() {
     return (data.articles || []).slice(0, 2).map((article: any) => ({
       title: article.title,
       description: article.snippet || "Geopolitical event detected",
-      location: { lat: 35 + Math.random() * 30, lng: -10 + Math.random() * 100 },
+      location: geolocateFromText(article.title + " " + (article.snippet || "")),
       source: "GDELT",
       category: "war",
       timestamp: new Date().toISOString(),
@@ -246,12 +348,21 @@ async function fetchACLEDEvents() {
       .filter(line => line.trim())
       .map((line: string) => {
         const parts = line.split(',');
+        const lat = parseFloat(parts[11]);
+        const lng = parseFloat(parts[12]);
+        const title = `ACLED Alert: ${parts[5]?.trim() || "Conflict event"}`;
+        const desc = `Event type: ${parts[6]?.trim() || "Unknown"} - ${parts[9]?.trim() || ""}`;
+        // Use parsed coords only when they look valid (not 0,0 null island)
+        const location =
+          !isNaN(lat) && !isNaN(lng) && (Math.abs(lat) > 0.5 || Math.abs(lng) > 0.5)
+            ? { lat, lng }
+            : geolocateFromText(title + " " + desc);
         return {
-          title: `ACLED Alert: ${parts[5]?.trim() || "Conflict event"}`,
-          description: `Event type: ${parts[6]?.trim() || "Unknown"} - ${parts[9]?.trim() || ""}`,
-          location: { lat: parseFloat(parts[11]) || 0, lng: parseFloat(parts[12]) || 0 },
+          title,
+          description: desc,
+          location,
           source: "ACLED",
-          category: parts[5]?.includes("Violence") || parts[5]?.includes("Battle") ? "war" : 
+          category: parts[5]?.includes("Violence") || parts[5]?.includes("Battle") ? "war" :
                    parts[5]?.includes("Protest") ? "counter_terrorism" : "war",
           timestamp: new Date().toISOString(),
         };
