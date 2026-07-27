@@ -1,6 +1,6 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
@@ -28,6 +28,78 @@ const icons: Record<string, L.DivIcon> = {
 };
 
 const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));
+
+const TRADE_ROUTES = [
+  {
+    name: "Suez Corridor",
+    points: [
+      [31.26, 32.3],
+      [20.0, 38.0],
+      [12.0, 44.0],
+    ] as [number, number][],
+  },
+  {
+    name: "Strait of Malacca Route",
+    points: [
+      [22.3, 114.2],
+      [10.0, 103.8],
+      [1.2, 104.0],
+    ] as [number, number][],
+  },
+  {
+    name: "Panama Route",
+    points: [
+      [25.8, -80.2],
+      [9.0, -79.5],
+      [-12.0, -77.0],
+    ] as [number, number][],
+  },
+];
+
+const CONFLICT_ZONES = [
+  {
+    name: "Eastern Europe AOI",
+    area: [
+      [51.5, 30.0],
+      [49.5, 40.5],
+      [45.0, 38.0],
+      [46.5, 28.0],
+    ] as [number, number][],
+  },
+  {
+    name: "Levant AOI",
+    area: [
+      [37.0, 34.0],
+      [36.0, 40.0],
+      [30.0, 39.0],
+      [30.0, 34.5],
+    ] as [number, number][],
+  },
+  {
+    name: "Red Sea AOI",
+    area: [
+      [22.0, 34.0],
+      [22.0, 44.0],
+      [12.0, 44.0],
+      [12.0, 36.0],
+    ] as [number, number][],
+  },
+];
+
+const PORTS = [
+  { name: "Rotterdam", lat: 51.95, lng: 4.13 },
+  { name: "Singapore", lat: 1.26, lng: 103.84 },
+  { name: "Shanghai", lat: 31.23, lng: 121.49 },
+  { name: "Jebel Ali", lat: 25.01, lng: 55.06 },
+  { name: "Los Angeles", lat: 33.74, lng: -118.27 },
+  { name: "Panama", lat: 8.95, lng: -79.57 },
+];
+
+interface MapLayers {
+  tradeRoutes: boolean;
+  conflictZones: boolean;
+  ports: boolean;
+}
 
 function MapFitter() {
   const map = useMap();
@@ -71,10 +143,12 @@ export default function WorldMap({
   events,
   selectedEvent,
   onSelectEvent,
+  activeLayers,
 }: {
   events: Event[];
   selectedEvent: Event | null;
   onSelectEvent: (event: Event) => void;
+  activeLayers: MapLayers;
 }) {
   return (
     <MapContainer
@@ -93,6 +167,40 @@ export default function WorldMap({
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
         noWrap={true}
       />
+      {activeLayers.tradeRoutes &&
+        TRADE_ROUTES.map((route) => (
+          <Polyline
+            key={route.name}
+            positions={route.points}
+            pathOptions={{ color: "#d4b36a", weight: 2.5, opacity: 0.85, dashArray: "6 6" }}
+          >
+            <Tooltip>{route.name}</Tooltip>
+          </Polyline>
+        ))}
+
+      {activeLayers.conflictZones &&
+        CONFLICT_ZONES.map((zone) => (
+          <Polygon
+            key={zone.name}
+            positions={zone.area}
+            pathOptions={{ color: "#ef4444", weight: 1.5, fillColor: "#ef4444", fillOpacity: 0.14 }}
+          >
+            <Tooltip>{zone.name}</Tooltip>
+          </Polygon>
+        ))}
+
+      {activeLayers.ports &&
+        PORTS.map((port) => (
+          <CircleMarker
+            key={port.name}
+            center={[port.lat, port.lng]}
+            radius={5}
+            pathOptions={{ color: "#93c5fd", fillColor: "#93c5fd", fillOpacity: 0.85, weight: 1 }}
+          >
+            <Tooltip>{`Port: ${port.name}`}</Tooltip>
+          </CircleMarker>
+        ))}
+
       {events.map((event) => (
         <Marker
           key={event.id}
@@ -132,4 +240,3 @@ export default function WorldMap({
     </MapContainer>
   );
 }
-

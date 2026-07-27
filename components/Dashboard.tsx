@@ -28,6 +28,7 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
 };
 
 type SidebarTab = "events" | "news" | "stocks" | "analyst";
+type MapLayerKey = "tradeRoutes" | "conflictZones" | "ports";
 
 export default function Dashboard() {
   const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
@@ -38,6 +39,11 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
+  const [activeLayers, setActiveLayers] = useState({
+    tradeRoutes: true,
+    conflictZones: true,
+    ports: true,
+  });
 
   const fetchEvents = async (manual = false) => {
     if (manual) setRefreshing(true);
@@ -81,6 +87,10 @@ export default function Dashboard() {
   const handleCloseDetail = () => {
     setDetailPanelOpen(false);
     setSelectedEvent(null);
+  };
+
+  const toggleLayer = (layer: MapLayerKey) => {
+    setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
 
   return (
@@ -185,6 +195,32 @@ export default function Dashboard() {
 
         {/* Map - on RIGHT, fills remaining space */}
         <div className="relative flex-1">
+          {/* Layer toggles */}
+          <div className="absolute left-4 top-4 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-3 py-2 text-[10px] backdrop-blur">
+            <div className="mb-2 uppercase tracking-wider text-slate-500">Map Layers</div>
+            <div className="flex gap-1">
+              {(
+                [
+                  ["tradeRoutes", "Routes"],
+                  ["conflictZones", "Conflict"],
+                  ["ports", "Ports"],
+                ] as [MapLayerKey, string][]
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => toggleLayer(key)}
+                  className={`rounded border px-2 py-0.5 uppercase tracking-wider transition ${
+                    activeLayers[key]
+                      ? "border-[#d4b36a] bg-[#0f2018] text-[#d4b36a]"
+                      : "border-slate-700 text-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Map legend */}
           <div className="absolute bottom-4 left-4 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-3 py-2 text-[10px] backdrop-blur">
             {Object.entries(categoryLabels).map(([key, val]) => (
@@ -205,6 +241,7 @@ export default function Dashboard() {
             events={events}
             selectedEvent={selectedEvent}
             onSelectEvent={handleEventSelect}
+            activeLayers={activeLayers}
           />
         </div>
       </div>
