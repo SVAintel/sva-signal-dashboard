@@ -38,7 +38,11 @@ export default function AmbientAudio() {
   };
 
   return (
-    <div className="relative flex items-center">
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setVolumeOpen(true)}
+      onMouseLeave={() => setVolumeOpen(false)}
+    >
       <audio
         ref={audioRef}
         src={AUDIO_SRC}
@@ -47,8 +51,6 @@ export default function AmbientAudio() {
       />
       <button
         onClick={toggle}
-        onMouseEnter={() => setVolumeOpen(true)}
-        onMouseLeave={() => setVolumeOpen(false)}
         title={missing ? "No ambient track found (public/audio/theme.mp3)" : playing ? "Mute ambient audio" : "Play ambient audio"}
         className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
           playing
@@ -61,20 +63,18 @@ export default function AmbientAudio() {
       </button>
 
       {volumeOpen && (
-        <div
-          onMouseEnter={() => setVolumeOpen(true)}
-          onMouseLeave={() => setVolumeOpen(false)}
-          className="absolute right-0 top-full z-[999] mt-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-3 py-2 backdrop-blur"
-        >
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-24 accent-[#d4b36a]"
-          />
+        <div className="absolute right-0 top-full z-[999] pt-1">
+          <div className="rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-3 py-2 backdrop-blur">
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-24 accent-[#d4b36a]"
+            />
+          </div>
         </div>
       )}
     </div>
