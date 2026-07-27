@@ -201,7 +201,11 @@ export default function Dashboard() {
             <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
           </div>
 
-          <WorldMap events={events} selectedEvent={selectedEvent} />
+          <WorldMap
+            events={events}
+            selectedEvent={selectedEvent}
+            onSelectEvent={handleEventSelect}
+          />
         </div>
       </div>
 

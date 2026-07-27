@@ -70,9 +70,11 @@ function MapFitter() {
 export default function WorldMap({
   events,
   selectedEvent,
+  onSelectEvent,
 }: {
   events: Event[];
   selectedEvent: Event | null;
+  onSelectEvent: (event: Event) => void;
 }) {
   return (
     <MapContainer
@@ -104,6 +106,25 @@ export default function WorldMap({
               </div>
               <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{event.title}</div>
               <div style={{ color: "#64748b", fontSize: "11px" }}>{event.source}</div>
+              <button
+                onClick={() => onSelectEvent(event)}
+                style={{
+                  marginTop: "8px",
+                  width: "100%",
+                  border: "1px solid #1e3a5f",
+                  background: "#0b1224",
+                  color: "#22d3ee",
+                  borderRadius: "4px",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                }}
+              >
+                Expand
+              </button>
             </div>
           </Popup>
         </Marker>
