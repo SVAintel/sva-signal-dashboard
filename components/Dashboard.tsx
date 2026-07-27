@@ -47,6 +47,7 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
   const [mobileView, setMobileView] = useState<"panel" | "map">("map");
+  const [layersMenuOpen, setLayersMenuOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
   const [activeLayers, setActiveLayers] = useState({
     tradeRoutes: true,
@@ -238,32 +239,6 @@ export default function Dashboard() {
 
         {/* Map - on RIGHT (desktop) / toggled full-screen panel (mobile) */}
         <div className={`relative flex-1 md:block ${mobileView === "map" ? "block" : "hidden"}`}>
-          {/* Layer toggles */}
-          <div className="absolute left-2 top-2 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-2 py-1.5 text-[9px] backdrop-blur sm:left-4 sm:top-4 sm:px-3 sm:py-2 sm:text-[10px]">
-            <div className="mb-1 uppercase tracking-wider text-slate-500 sm:mb-2">Map Layers</div>
-            <div className="flex gap-1">
-              {(
-                [
-                  ["tradeRoutes", "Routes"],
-                  ["conflictZones", "Conflict"],
-                  ["ports", "Ports"],
-                ] as [MapLayerKey, string][]
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => toggleLayer(key)}
-                  className={`rounded border px-1.5 py-0.5 uppercase tracking-wider transition sm:px-2 ${
-                    activeLayers[key]
-                      ? "border-[#d4b36a] bg-[#0f2018] text-[#d4b36a]"
-                      : "border-slate-700 text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Map legend — collapsed to a compact strip on mobile to save screen space */}
           <div className="absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#23503a] bg-[#07120dcc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
             {Object.entries(categoryLabels).map(([key, val]) => (
@@ -278,6 +253,42 @@ export default function Dashboard() {
           <div className="absolute right-2 top-2 z-[999] rounded border border-[#23503a] bg-[#07120dcc] px-2 py-1 text-[9px] backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-[10px]">
             <span className="font-bold text-[#d4b36a]">{events.length}</span>
             <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
+          </div>
+
+          {/* Map Layers dropdown — positioned under the signals-active badge */}
+          <div className="absolute right-2 top-10 z-[999] sm:right-4 sm:top-12">
+            <button
+              onClick={() => setLayersMenuOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded border border-[#23503a] bg-[#07120dcc] px-2 py-1 text-[9px] uppercase tracking-wider text-slate-400 backdrop-blur transition hover:text-[#d4b36a] sm:px-3 sm:text-[10px]"
+            >
+              Map Layers
+              <span className={`transition-transform ${layersMenuOpen ? "rotate-180" : ""}`}>▾</span>
+            </button>
+
+            {layersMenuOpen && (
+              <div className="mt-1 flex flex-col gap-1 rounded border border-[#23503a] bg-[#07120dcc] px-2 py-2 text-[9px] backdrop-blur sm:px-3 sm:text-[10px]">
+                {(
+                  [
+                    ["tradeRoutes", "Trade Routes"],
+                    ["conflictZones", "Conflict Zones"],
+                    ["ports", "Ports"],
+                  ] as [MapLayerKey, string][]
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => toggleLayer(key)}
+                    className={`flex items-center justify-between gap-3 rounded border px-2 py-1 uppercase tracking-wider transition ${
+                      activeLayers[key]
+                        ? "border-[#d4b36a] bg-[#0f2018] text-[#d4b36a]"
+                        : "border-slate-700 text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <span>{activeLayers[key] ? "ON" : "OFF"}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <WorldMap
