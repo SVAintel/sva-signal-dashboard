@@ -36,37 +36,39 @@ function downsample(points: [number, number][], maxPoints: number): [number, num
 }
 
 function parseShippingRoutes(geojson: any): RouteFeature[] {
-  const features = Array.isArray(geojson?.features) ? geojson.features.slice(0, 140) : [];
+  const features = Array.isArray(geojson?.features) ? geojson.features : [];
+  const routes: RouteFeature[] = [];
 
-  return features
-    .map((f: any, idx: number) => {
-      const geom = f?.geometry;
-      if (!geom) return null;
+  for (const f of features) {
+    const geom = f?.geometry;
+    if (!geom) continue;
+    const routeClass = String(f?.properties?.Type || "").trim() || "Route";
 
-      if (geom.type === "LineString" && Array.isArray(geom.coordinates)) {
-        const points = geom.coordinates
+    if (geom.type === "LineString" && Array.isArray(geom.coordinates)) {
+      const points = geom.coordinates
+        .map((c: number[]) => [Number(c[1]), Number(c[0])] as [number, number])
+        .filter((p: [number, number]) => !isNaN(p[0]) && !isNaN(p[1]));
+      if (points.length >= 2) {
+        routes.push({ name: `${routeClass} Route ${routes.length + 1}`, points: downsample(points, 22) });
+      }
+      continue;
+    }
+
+    // MultiLineString: every segment is a distinct shipping lane — keep them all,
+    // not just the longest one, otherwise we drop the vast majority of real routes.
+    if (geom.type === "MultiLineString" && Array.isArray(geom.coordinates)) {
+      for (const line of geom.coordinates) {
+        const points = (line as number[][])
           .map((c: number[]) => [Number(c[1]), Number(c[0])] as [number, number])
           .filter((p: [number, number]) => !isNaN(p[0]) && !isNaN(p[1]));
-        if (points.length < 2) return null;
-        return { name: `Trade Route ${idx + 1}`, points: downsample(points, 22) };
+        if (points.length < 2) continue;
+        routes.push({ name: `${routeClass} Route ${routes.length + 1}`, points: downsample(points, 18) });
       }
+    }
+  }
 
-      if (geom.type === "MultiLineString" && Array.isArray(geom.coordinates)) {
-        const bestLine = geom.coordinates
-          .map((line: number[][]) =>
-            line
-              .map((c: number[]) => [Number(c[1]), Number(c[0])] as [number, number])
-              .filter((p: [number, number]) => !isNaN(p[0]) && !isNaN(p[1]))
-          )
-          .sort((a: [number, number][], b: [number, number][]) => b.length - a.length)[0];
-
-        if (!bestLine || bestLine.length < 2) return null;
-        return { name: `Trade Route ${idx + 1}`, points: downsample(bestLine, 22) };
-      }
-
-      return null;
-    })
-    .filter((r: RouteFeature | null): r is RouteFeature => !!r);
+  // Cap total rendered routes for performance while keeping broad geographic coverage.
+  return routes.slice(0, 260);
 }
 
 function parsePorts(geojson: any): PortFeature[] {
