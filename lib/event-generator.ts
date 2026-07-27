@@ -297,7 +297,7 @@ async function fetchAlphaVantageEvents() {
         description: `Tech sector (AAPL) at $${quote["05. price"]}, change: ${change}%`,
         location: { lat: 37.7749, lng: -122.4194 },
         source: "Alpha Vantage",
-        url: "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL",
+        url: "https://www.alphavantage.co/", // raw API endpoint needs an apikey param to load; link to the human-readable site instead
         category: "market",
         timestamp: new Date().toISOString(),
       }];
