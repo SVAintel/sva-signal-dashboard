@@ -42,7 +42,16 @@ export default function Dashboard() {
       try {
         const res = await axios.get("/api/events");
         setAllEvents(res.data);
-        setLastUpdated(new Date().toUTCString().replace("GMT", "Z"));
+        setLastUpdated(
+          new Date().toLocaleString(undefined, {
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            timeZoneName: "short",
+          })
+        );
       } catch (error) {
         console.error("Failed to fetch events:", error);
       } finally {
