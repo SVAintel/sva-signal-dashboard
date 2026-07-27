@@ -192,7 +192,7 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
             <div>
               <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
               <div className="space-y-2">
-                <a href={analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#23503a] bg-[#0a1711] p-3 text-sm text-[#d4b36a] hover:bg-[#1a3a2b] hover:border-[#d4b36a]/50 transition">
+                <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#23503a] bg-[#0a1711] p-3 text-sm text-[#d4b36a] hover:bg-[#1a3a2b] hover:border-[#d4b36a]/50 transition">
                   <span className="text-xs font-mono">{event.source}</span>
                   <span className="flex-1 truncate text-slate-400">{event.title}</span>
                   <span className="text-xs">→</span>

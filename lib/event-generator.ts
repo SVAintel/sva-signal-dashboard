@@ -135,6 +135,7 @@ export async function generateMockEvents(): Promise<Event[]> {
         category: rawEvent.category,
         location: rawEvent.location,
         source: rawEvent.source,
+        url: rawEvent.url,
         timestamp: rawEvent.timestamp,
         aiNotes: knownKnownsMap[category]?.[Math.floor(Math.random() * knownKnownsMap[category].length)] || "Event under analysis",
         confidence: ["high", "medium", "low"][Math.floor(Math.random() * 3)],
@@ -261,6 +262,7 @@ async function fetchNewsAPIEvents() {
           description: article.description || "Breaking news",
           location: geolocateFromText(article.title + " " + (article.description || "") + " " + (article.source?.name || "")),
           source: `NewsAPI / ${article.source?.name || "Unknown"}`,
+          url: article.url,
           category,
           timestamp: new Date(article.publishedAt).toISOString(),
         });
@@ -295,6 +297,7 @@ async function fetchAlphaVantageEvents() {
         description: `Tech sector (AAPL) at $${quote["05. price"]}, change: ${change}%`,
         location: { lat: 37.7749, lng: -122.4194 },
         source: "Alpha Vantage",
+        url: "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL",
         category: "market",
         timestamp: new Date().toISOString(),
       }];
@@ -327,6 +330,7 @@ async function fetchUSGSEvents() {
         description: feature.properties.title || "Seismic activity detected",
         location: { lat: feature.geometry.coordinates[1], lng: feature.geometry.coordinates[0] },
         source: "USGS",
+        url: feature.properties.url || "https://earthquake.usgs.gov",
         category: "natural_disaster",
         timestamp: new Date(feature.properties.time).toISOString(),
       };
@@ -356,6 +360,7 @@ async function fetchGDELTEvents() {
       description: article.snippet || "Geopolitical event detected",
       location: geolocateFromText(article.title + " " + (article.snippet || "")),
       source: "GDELT",
+      url: article.url,
       category: "war",
       timestamp: new Date().toISOString(),
     }));
@@ -398,6 +403,7 @@ async function fetchACLEDEvents() {
           description: desc,
           location,
           source: "ACLED",
+          url: "https://acleddata.com/data-export-tool",
           category: parts[5]?.includes("Violence") || parts[5]?.includes("Battle") ? "war" :
                    parts[5]?.includes("Protest") ? "counter_terrorism" : "war",
           timestamp: new Date().toISOString(),
@@ -429,6 +435,7 @@ async function fetchCoinGeckoEvents() {
       description: `Global crypto market volatility signal. Total market cap: $${(data.data?.total_market_cap?.usd / 1e9).toFixed(2)}B`,
       location: { lat: 51.5074, lng: -0.1278 }, // London - crypto hub
       source: "CoinGecko",
+      url: "https://www.coingecko.com/en/global-charts",
       category: "market",
       timestamp: new Date().toISOString(),
     }];
@@ -459,6 +466,9 @@ async function fetchEMSCEvents() {
         description: `Depth: ${feature.geometry.coordinates[2]}km - EMSC high-precision data`,
         location: { lat: feature.geometry.coordinates[1], lng: feature.geometry.coordinates[0] },
         source: "EMSC",
+        url: feature.properties.source_id
+          ? `https://www.emsc-csem.org/Earthquake/earthquake.php?id=${feature.properties.source_id}`
+          : "https://www.emsc-csem.org",
         category: "natural_disaster",
         timestamp: new Date(feature.properties.origin_time).toISOString(),
       };

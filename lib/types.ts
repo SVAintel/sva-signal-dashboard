@@ -4,6 +4,7 @@ export interface Event {
   category: string;
   location: { lat: number; lng: number };
   source: string;
+  url?: string;
   timestamp: string;
   description: string;
   aiNotes: string;
