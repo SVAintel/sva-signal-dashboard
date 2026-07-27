@@ -1,9 +1,9 @@
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 
-// NewsAPI's free tier caps out at 100 requests/24h. Rather than re-fetching on
-// every single page load (force-dynamic), cache the upstream call for 10 minutes
-// so the whole user base shares one fetch per window — still "live", just quota-safe.
-export const revalidate = 600;
+// NewsAPI's free tier caps out at 100 requests/24h, shared across this route
+// AND the two NewsAPI calls inside lib/event-generator.ts. Set generously long
+// (4h) so combined usage across all 3 call sites stays well under quota.
+export const revalidate = 14400;
 
 export async function GET() {
   if (!NEWS_API_KEY) {
@@ -16,7 +16,7 @@ export async function GET() {
 
     const res = await fetch(
       `https://newsapi.org/v2/top-headlines?category=general&sortBy=publishedAt&language=en&pageSize=30&apiKey=${NEWS_API_KEY}`,
-      { signal: controller.signal, next: { revalidate: 600 } }
+      { signal: controller.signal, next: { revalidate: 14400 } }
     );
     clearTimeout(timeout);
 

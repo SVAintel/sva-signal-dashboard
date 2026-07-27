@@ -1,5 +1,12 @@
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
 
+// Alpha Vantage's free tier caps out at 25 requests/day total. This route was
+// previously fully dynamic (no caching at all) — every page load / symbol
+// switch hit the upstream API fresh, which exhausts the daily quota almost
+// immediately. Cache per-symbol for 6h so repeat visits/symbol-switches reuse
+// the same cached response instead of re-pulling.
+export const revalidate = 21600;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get("symbol") || "AAPL";
@@ -14,7 +21,7 @@ export async function GET(request: Request) {
 
     const res = await fetch(
       `https://www.alphavantage.co/query?function=INTRADAY&symbol=${symbol}&interval=5min&apikey=${ALPHA_VANTAGE_KEY}`,
-      { signal: controller.signal }
+      { signal: controller.signal, next: { revalidate: 21600 } }
     );
     clearTimeout(timeout);
 

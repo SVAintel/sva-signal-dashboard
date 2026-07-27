@@ -178,11 +178,11 @@ async function fetchNewsAPIEvents() {
     const [headlinesRes, everythingRes] = await Promise.all([
       fetch(
         `https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=50&apiKey=${NEWS_API_KEY}`,
-        { signal: controller.signal, next: { revalidate: 300 } }
+        { signal: controller.signal, next: { revalidate: 14400 } } // 4h — NewsAPI free tier caps at 100 req/24h across all call sites
       ),
       fetch(
         `https://newsapi.org/v2/everything?q=attack+OR+airstrike+OR+missile+OR+shooting+OR+explosion+OR+troops+OR+outbreak+OR+cyberattack+OR+nuclear+OR+coup+OR+arrested+OR+sanctions&sortBy=publishedAt&language=en&pageSize=50&apiKey=${NEWS_API_KEY}`,
-        { signal: controller.signal, next: { revalidate: 300 } }
+        { signal: controller.signal, next: { revalidate: 14400 } }
       ),
     ]);
     clearTimeout(timeout);
@@ -283,7 +283,7 @@ async function fetchAlphaVantageEvents() {
     
     const res = await fetch(
       `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=${ALPHA_VANTAGE_KEY}`,
-      { signal: controller.signal, next: { revalidate: 900 } }
+      { signal: controller.signal, next: { revalidate: 21600 } } // 6h — Alpha Vantage free tier caps at 25 req/day
     );
     clearTimeout(timeout);
     
@@ -317,7 +317,7 @@ async function fetchUSGSEvents() {
     
     const res = await fetch(
       "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson",
-      { signal: controller.signal, next: { revalidate: 300 } }
+      { signal: controller.signal, next: { revalidate: 1800 } }
     );
     clearTimeout(timeout);
     
@@ -349,7 +349,7 @@ async function fetchGDELTEvents() {
     
     const res = await fetch(
       "https://api.gdeltproject.org/api/v2/search?query=conflict&mode=artlist&maxrecords=6&format=json",
-      { signal: controller.signal, next: { revalidate: 300 } }
+      { signal: controller.signal, next: { revalidate: 1800 } }
     );
     clearTimeout(timeout);
     
@@ -423,7 +423,7 @@ async function fetchCoinGeckoEvents() {
     
     const res = await fetch(
       "https://api.coingecko.com/api/v3/global",
-      { signal: controller.signal, next: { revalidate: 300 } }
+      { signal: controller.signal, next: { revalidate: 900 } }
     );
     clearTimeout(timeout);
     
@@ -453,7 +453,7 @@ async function fetchEMSCEvents() {
     
     const res = await fetch(
       "https://www.emsc-csem.org/api/test/latest?limit=6&start_year=2023",
-      { signal: controller.signal, next: { revalidate: 300 } }
+      { signal: controller.signal, next: { revalidate: 900 } }
     );
     clearTimeout(timeout);
     
