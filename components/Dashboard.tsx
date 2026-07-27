@@ -7,6 +7,7 @@ import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
 import LiveBroadcasts from "./LiveBroadcasts";
 import EventDetailPanel from "./EventDetailPanel";
+import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
 import { Event } from "@/lib/types";
 import axios from "axios";
@@ -26,7 +27,7 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
   humanitarian: { label: "HUM", color: "#f43f5e", tooltip: "HUM — Humanitarian Crises & Displacement" },
 };
 
-type SidebarTab = "events" | "news" | "stocks";
+type SidebarTab = "events" | "news" | "stocks" | "analyst";
 
 export default function Dashboard() {
   const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
@@ -139,7 +140,7 @@ export default function Dashboard() {
         <div className="w-[420px] flex flex-col bg-[#080d1a] border-r border-[#1e3a5f]">
           {/* Tab Buttons */}
           <div className="flex border-b border-[#1e3a5f] bg-[#0f172a]">
-            {(["events", "news", "stocks"] as SidebarTab[]).map((tab) => (
+            {(["events", "news", "stocks", "analyst"] as SidebarTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -152,6 +153,7 @@ export default function Dashboard() {
                 {tab === "events" && "SIGNALS"}
                 {tab === "news" && "NEWS"}
                 {tab === "stocks" && "MARKETS"}
+                {tab === "analyst" && "AI ANALYST"}
               </button>
             ))}
           </div>
@@ -177,6 +179,7 @@ export default function Dashboard() {
             )}
             {activeTab === "news" && <NewsPanel />}
             {activeTab === "stocks" && <StockMarketPanel />}
+            {activeTab === "analyst" && <AIAnalystPanel events={events} />}
           </div>
         </div>
 
