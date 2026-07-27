@@ -1,9 +1,10 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
+import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import { useEffect } from "react";
 
 const makeIcon = (color: string) =>
@@ -101,9 +102,11 @@ interface MapLayers {
   ports: boolean;
 }
 
+interface ConflictZoneOutput extends ConflictZoneData {}
+
 interface MapLayerData {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
-  conflictZones: Array<{ name: string; center: [number, number]; radiusKm: number; intensity: number }>;
+  conflictZones: ConflictZoneOutput[];
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
 }
 
@@ -151,12 +154,14 @@ export default function WorldMap({
   onSelectEvent,
   activeLayers,
   layerData,
+  onSelectConflictZone,
 }: {
   events: Event[];
   selectedEvent: Event | null;
   onSelectEvent: (event: Event) => void;
   activeLayers: MapLayers;
   layerData: MapLayerData | null;
+  onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
@@ -192,16 +197,22 @@ export default function WorldMap({
 
       {activeLayers.conflictZones &&
         (zonesToRender.length > 0
-          ? zonesToRender.map((zone) => (
-              <Circle
-                key={zone.name}
-                center={zone.center}
-                radius={zone.radiusKm * 1000}
-                pathOptions={{ color: "#ef4444", weight: 1.5, fillColor: "#ef4444", fillOpacity: 0.13 }}
-              >
-                <Tooltip>{`${zone.name} • intensity ${zone.intensity}`}</Tooltip>
-              </Circle>
-            ))
+          ? zonesToRender.map((zone) => {
+              const color =
+                zone.intensity === "high" ? "#ef4444" : zone.intensity === "medium" ? "#f59e0b" : "#84cc16";
+              return (
+                <GeoJSON
+                  key={zone.id}
+                  data={{ type: "Feature", properties: {}, geometry: zone.geometry } as any}
+                  style={{ color, weight: 1.5, fillColor: color, fillOpacity: 0.16 }}
+                  eventHandlers={{
+                    click: () => onSelectConflictZone?.(zone),
+                  }}
+                >
+                  <Tooltip sticky>{`${zone.name} (click to expand)`}</Tooltip>
+                </GeoJSON>
+              );
+            })
           : CONFLICT_ZONES.map((zone) => (
               <Polygon
                 key={zone.name}

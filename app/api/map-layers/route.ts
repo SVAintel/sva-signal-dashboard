@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { generateMockEvents } from "@/lib/event-generator";
+import { CONFLICTS } from "@/lib/conflict-data";
 
 const SHIPPING_LANES_URL =
   "https://raw.githubusercontent.com/newzealandpaul/Shipping-Lanes/main/data/Shipping_Lanes_v1.geojson";
 const PORTS_URL =
   "https://data.harvestportal.org/dataset/45b504e2-9ae5-4c30-9125-b1d2ae301f05/resource/32f52965-1ae1-47a0-b1ad-45d1bf64093b/download/ports_of_the_world_wpi.geojson";
+const COUNTRIES_URL =
+  "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
 
 interface RouteFeature {
   name: string;
@@ -19,11 +21,17 @@ interface PortFeature {
   size: string;
 }
 
-interface ConflictZone {
+interface ConflictZoneOutput {
+  id: string;
   name: string;
-  center: [number, number];
-  radiusKm: number;
-  intensity: number;
+  countries: string[];
+  actors: string[];
+  description: string;
+  casualties: string;
+  startYear: number;
+  intensity: "high" | "medium" | "low";
+  sources: string[];
+  geometry: { type: "MultiPolygon"; coordinates: number[][][][] };
 }
 
 function downsample(points: [number, number][], maxPoints: number): [number, number][] {
@@ -106,46 +114,59 @@ function parsePorts(geojson: any): PortFeature[] {
   return scored;
 }
 
-function buildConflictZones(events: Awaited<ReturnType<typeof generateMockEvents>>): ConflictZone[] {
-  const conflict = events.filter((e) =>
-    ["war", "counter_terrorism", "political_unrest"].includes(e.category)
-  );
-
-  const bins: Record<string, { lat: number; lng: number; count: number }> = {};
-  for (const e of conflict) {
-    const latBin = Math.round(e.location.lat / 8) * 8;
-    const lngBin = Math.round(e.location.lng / 8) * 8;
-    const key = `${latBin}:${lngBin}`;
-    if (!bins[key]) bins[key] = { lat: latBin, lng: lngBin, count: 0 };
-    bins[key].count += 1;
+function buildConflictZones(countriesGeojson: any): ConflictZoneOutput[] {
+  const features = Array.isArray(countriesGeojson?.features) ? countriesGeojson.features : [];
+  const byName = new Map<string, any>();
+  for (const f of features) {
+    const name = f?.properties?.name;
+    if (name) byName.set(name, f.geometry);
   }
 
-  return Object.values(bins)
-    .filter((b) => b.count >= 1)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10)
-    .map((b, idx) => ({
-      name: `Conflict Zone ${idx + 1}`,
-      center: [b.lat, b.lng] as [number, number],
-      radiusKm: Math.min(380, 120 + b.count * 45),
-      intensity: b.count,
-    }));
+  const zones: ConflictZoneOutput[] = [];
+  for (const conflict of CONFLICTS) {
+    // Merge every matched country's polygon rings into one MultiPolygon so the
+    // whole conflict renders as a single outlined zone with shared metadata.
+    const polygons: number[][][][] = [];
+    for (const countryName of conflict.countries) {
+      const geom = byName.get(countryName);
+      if (!geom) continue;
+      if (geom.type === "Polygon") polygons.push(geom.coordinates);
+      else if (geom.type === "MultiPolygon") polygons.push(...geom.coordinates);
+    }
+    if (polygons.length === 0) continue;
+
+    zones.push({
+      id: conflict.id,
+      name: conflict.name,
+      countries: conflict.countries,
+      actors: conflict.actors,
+      description: conflict.description,
+      casualties: conflict.casualties,
+      startYear: conflict.startYear,
+      intensity: conflict.intensity,
+      sources: conflict.sources,
+      geometry: { type: "MultiPolygon", coordinates: polygons },
+    });
+  }
+
+  return zones;
 }
 
 export async function GET() {
   try {
-    const [shippingRes, portsRes, events] = await Promise.all([
+    const [shippingRes, portsRes, countriesRes] = await Promise.all([
       fetch(SHIPPING_LANES_URL, { next: { revalidate: 21600 } }), // 6h
       fetch(PORTS_URL, { next: { revalidate: 43200 } }), // 12h
-      generateMockEvents(),
+      fetch(COUNTRIES_URL, { next: { revalidate: 604800 } }), // 7d — borders rarely change
     ]);
 
     const shippingData = shippingRes.ok ? await shippingRes.json() : null;
     const portsData = portsRes.ok ? await portsRes.json() : null;
+    const countriesData = countriesRes.ok ? await countriesRes.json() : null;
 
     const tradeRoutes = shippingData ? parseShippingRoutes(shippingData) : [];
     const ports = portsData ? parsePorts(portsData) : [];
-    const conflictZones = buildConflictZones(events);
+    const conflictZones = countriesData ? buildConflictZones(countriesData) : [];
 
     return NextResponse.json({ tradeRoutes, conflictZones, ports });
   } catch (error) {

@@ -7,6 +7,7 @@ import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
 import LiveBroadcasts from "./LiveBroadcasts";
 import EventDetailPanel from "./EventDetailPanel";
+import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
 import { Event } from "@/lib/types";
@@ -31,7 +32,7 @@ type SidebarTab = "events" | "news" | "stocks" | "analyst";
 type MapLayerKey = "tradeRoutes" | "conflictZones" | "ports";
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
-  conflictZones: Array<{ name: string; center: [number, number]; radiusKm: number; intensity: number }>;
+  conflictZones: ConflictZoneData[];
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
 };
 
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+  const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
@@ -112,7 +114,6 @@ export default function Dashboard() {
   const toggleLayer = (layer: MapLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
-
   return (
     <div className="flex h-screen flex-col bg-[#040906] text-slate-200">
       {/* Top Bar */}
@@ -263,6 +264,7 @@ export default function Dashboard() {
             onSelectEvent={handleEventSelect}
             activeLayers={activeLayers}
             layerData={layerData}
+            onSelectConflictZone={setSelectedConflictZone}
           />
         </div>
       </div>
@@ -271,6 +273,12 @@ export default function Dashboard() {
       <EventDetailPanel
         event={selectedEvent}
         onClose={handleCloseDetail}
+      />
+
+      {/* Conflict Zone Detail Modal */}
+      <ConflictZoneDetailPanel
+        zone={selectedConflictZone}
+        onClose={() => setSelectedConflictZone(null)}
       />
     </div>
   );
