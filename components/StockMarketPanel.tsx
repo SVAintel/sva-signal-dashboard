@@ -40,16 +40,16 @@ export default function StockMarketPanel() {
   const changePercent = firstPrice ? ((change / firstPrice) * 100).toFixed(2) : "0.00";
 
   return (
-    <div className="flex h-full flex-col bg-[#060a14] border-l border-[#1e3a5f]">
+    <div className="flex h-full flex-col bg-[#090506] border-l border-[#3a1d24]">
       {/* Header */}
-      <div className="border-b border-[#1e3a5f] bg-[#080d1a] px-4 py-3">
+      <div className="border-b border-[#3a1d24] bg-[#12090b] px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <TrendingUp size={16} className="text-cyan-400" />
-            <h2 className="text-xs font-bold uppercase tracking-widest text-cyan-400">Market</h2>
+            <TrendingUp size={16} className="text-[#d4b36a]" />
+            <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Market</h2>
           </div>
           <div className="text-right">
-            <div className="text-sm font-bold text-cyan-400">${lastPrice.toFixed(2)}</div>
+            <div className="text-sm font-bold text-[#d4b36a]">${lastPrice.toFixed(2)}</div>
             <div className={`text-xs ${change >= 0 ? "text-green-400" : "text-red-400"}`}>
               {change >= 0 ? "+" : ""}{changePercent}%
             </div>
@@ -64,8 +64,8 @@ export default function StockMarketPanel() {
               onClick={() => setSelectedSymbol(sym)}
               className={`text-[10px] px-2 py-1 rounded transition ${
                 selectedSymbol === sym
-                  ? "bg-cyan-400 text-black font-bold"
-                  : "bg-[#1e3a5f] text-slate-300 hover:bg-[#2a4a7f]"
+                  ? "bg-[#d4b36a] text-[#12090b] font-bold"
+                  : "bg-[#2a131b] text-slate-300 hover:bg-[#3a1d24]"
               }`}
             >
               {sym}
@@ -83,7 +83,7 @@ export default function StockMarketPanel() {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#3a1d24" vertical={false} />
               <XAxis
                 dataKey="time"
                 stroke="#64748b"
@@ -93,17 +93,17 @@ export default function StockMarketPanel() {
               <YAxis stroke="#64748b" style={{ fontSize: "10px" }} tick={{ fill: "#94a3b8" }} />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#0f172a",
-                  border: "1px solid #1e3a5f",
+                  backgroundColor: "#140b0f",
+                  border: "1px solid #3a1d24",
                   borderRadius: "4px",
                   fontSize: "11px",
                 }}
-                labelStyle={{ color: "#cyan-400" }}
+                labelStyle={{ color: "#d4b36a" }}
               />
               <Line
                 type="monotone"
                 dataKey="price"
-                stroke="#06b6d4"
+                stroke="#d4b36a"
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}

@@ -7,5 +7,5 @@ html {
 }
 
 body {
-  @apply bg-slate-900 text-slate-50;
+  @apply bg-[#090506] text-slate-50;
 }

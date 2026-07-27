@@ -6,14 +6,14 @@ export default function LandingPage() {
   const { setDashboardActive } = useStore();
 
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-[#060a14] via-[#0a0f1f] to-[#0d1428] text-center">
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-gradient-to-b from-[#070304] via-[#100608] to-[#16080b] text-center">
       {/* Background grid effect */}
       <div className="absolute inset-0 opacity-10 pointer-events-none">
         <div
           className="absolute inset-0"
           style={{
             backgroundImage:
-              "linear-gradient(0deg, transparent 24%, rgba(6, 182, 212, 0.05) 25%, rgba(6, 182, 212, 0.05) 26%, transparent 27%, transparent 74%, rgba(6, 182, 212, 0.05) 75%, rgba(6, 182, 212, 0.05) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(6, 182, 212, 0.05) 25%, rgba(6, 182, 212, 0.05) 26%, transparent 27%, transparent 74%, rgba(6, 182, 212, 0.05) 75%, rgba(6, 182, 212, 0.05) 76%, transparent 77%, transparent)",
+              "linear-gradient(0deg, transparent 24%, rgba(212, 179, 106, 0.06) 25%, rgba(212, 179, 106, 0.06) 26%, transparent 27%, transparent 74%, rgba(212, 179, 106, 0.06) 75%, rgba(212, 179, 106, 0.06) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(212, 179, 106, 0.06) 25%, rgba(212, 179, 106, 0.06) 26%, transparent 27%, transparent 74%, rgba(212, 179, 106, 0.06) 75%, rgba(212, 179, 106, 0.06) 76%, transparent 77%, transparent)",
             backgroundSize: "50px 50px",
           }}
         />
@@ -24,9 +24,9 @@ export default function LandingPage() {
         {/* Logo/Branding */}
         <div className="mb-8 flex justify-center">
           <div className="flex items-center gap-3">
-            <div className="h-3 w-3 animate-pulse rounded-full bg-cyan-400" />
-            <span className="text-sm font-bold uppercase tracking-[0.3em] text-cyan-400">SVA</span>
-            <div className="h-3 w-3 animate-pulse rounded-full bg-cyan-400" />
+            <div className="h-3 w-3 animate-pulse rounded-full bg-[#d4b36a]" />
+            <span className="text-sm font-bold uppercase tracking-[0.3em] text-[#d4b36a]">SVA</span>
+            <div className="h-3 w-3 animate-pulse rounded-full bg-[#d4b36a]" />
           </div>
         </div>
 
@@ -34,7 +34,7 @@ export default function LandingPage() {
         <h1 className="mb-4 text-5xl font-bold tracking-tight text-slate-100">
           Sovereign Veil
           <br />
-          <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-[#d4b36a] to-[#a33a4e] bg-clip-text text-transparent">
             Analytics
           </span>
         </h1>
@@ -57,10 +57,10 @@ export default function LandingPage() {
           className="group relative inline-block px-8 py-3 font-bold uppercase tracking-widest text-black"
         >
           {/* Glow effect */}
-          <div className="absolute inset-0 rounded bg-gradient-to-r from-cyan-400 to-blue-500 opacity-0 blur-lg group-hover:opacity-100 transition duration-500" />
+          <div className="absolute inset-0 rounded bg-gradient-to-r from-[#d4b36a] to-[#a33a4e] opacity-0 blur-lg group-hover:opacity-100 transition duration-500" />
           
           {/* Button */}
-          <div className="relative rounded bg-cyan-400 px-8 py-3 text-sm font-bold uppercase tracking-widest text-black transition group-hover:scale-105 group-hover:bg-cyan-300">
+          <div className="relative rounded border border-[#d4b36a] bg-[#130a0c] px-8 py-3 text-sm font-bold uppercase tracking-widest text-[#d4b36a] transition group-hover:scale-105 group-hover:bg-[#1d0e12]">
             Enter Dashboard
           </div>
         </button>
@@ -73,8 +73,8 @@ export default function LandingPage() {
       </div>
 
       {/* Decorative elements */}
-      <div className="absolute top-20 left-10 h-40 w-40 rounded-full bg-cyan-500/5 blur-3xl" />
-      <div className="absolute bottom-20 right-10 h-40 w-40 rounded-full bg-blue-500/5 blur-3xl" />
+      <div className="absolute top-20 left-10 h-40 w-40 rounded-full bg-[#a33a4e]/15 blur-3xl" />
+      <div className="absolute bottom-20 right-10 h-40 w-40 rounded-full bg-[#d4b36a]/10 blur-3xl" />
     </div>
   );
 }

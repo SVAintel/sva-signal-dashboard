@@ -84,7 +84,7 @@ export default function WorldMap({
       maxZoom={8}
       maxBounds={worldBounds}
       maxBoundsViscosity={1.0}
-      style={{ height: "100%", width: "100%", background: "#0a0f1e" }}
+      style={{ height: "100%", width: "100%", background: "#090506" }}
       zoomControl={false}
     >
       <MapFitter />
@@ -100,8 +100,8 @@ export default function WorldMap({
           icon={icons[event.category] || icons.war}
         >
           <Popup className="tactical-popup">
-            <div style={{ background: "#0f172a", border: "1px solid #1e3a5f", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
-              <div style={{ color: "#22d3ee", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+            <div style={{ background: "#140b0f", border: "1px solid #3a1d24", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+              <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
                 {event.category.replace(/_/g, " ")}
               </div>
               <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{event.title}</div>
@@ -111,9 +111,9 @@ export default function WorldMap({
                 style={{
                   marginTop: "8px",
                   width: "100%",
-                  border: "1px solid #1e3a5f",
-                  background: "#0b1224",
-                  color: "#22d3ee",
+                  border: "1px solid #3a1d24",
+                  background: "#1a0f12",
+                  color: "#d4b36a",
                   borderRadius: "4px",
                   fontSize: "10px",
                   fontWeight: 700,

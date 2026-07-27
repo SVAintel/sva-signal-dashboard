@@ -76,13 +76,13 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
   return (
     <div className="flex h-full flex-col p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[11px] font-bold uppercase tracking-widest text-cyan-400">AI Analyst</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#d4b36a]">AI Analyst</h2>
         <span className="text-[10px] text-slate-500">{events.length} active signals</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded border border-[#1e3a5f] bg-[#0b1224] p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto rounded border border-[#3a1d24] bg-[#10080b] p-3 space-y-2">
         {messages.map((msg, idx) => (
-          <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-cyan-300"}`}>
+          <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
             <span className="mr-2 text-[10px] font-bold uppercase tracking-widest">
               {msg.role === "assistant" ? "AI" : "You"}
             </span>
@@ -110,7 +110,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the analyst..."
-          className="flex-1 rounded border border-[#1e3a5f] bg-[#081021] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+          className="flex-1 rounded border border-[#3a1d24] bg-[#0d0709] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
         />
         <button
           type="submit"
@@ -118,7 +118,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
           className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
             loading || !input.trim()
               ? "cursor-not-allowed border-slate-700 text-slate-600"
-              : "border-cyan-600 text-cyan-400 hover:bg-cyan-900/30"
+              : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2b171d]"
           }`}
         >
           {loading ? "Thinking..." : "Ask"}

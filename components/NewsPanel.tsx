@@ -35,12 +35,12 @@ export default function NewsPanel() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-[#060a14] border-l border-[#1e3a5f]">
+    <div className="flex h-full flex-col bg-[#090506] border-l border-[#3a1d24]">
       {/* Header */}
-      <div className="border-b border-[#1e3a5f] bg-[#080d1a] px-4 py-3">
+      <div className="border-b border-[#3a1d24] bg-[#12090b] px-4 py-3">
         <div className="flex items-center gap-2">
-          <Newspaper size={16} className="text-cyan-400" />
-          <h2 className="text-xs font-bold uppercase tracking-widest text-cyan-400">Live News</h2>
+          <Newspaper size={16} className="text-[#d4b36a]" />
+          <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Live News</h2>
         </div>
         <p className="text-[10px] text-slate-600 mt-1">Global Intelligence Feed</p>
       </div>
@@ -60,10 +60,10 @@ export default function NewsPanel() {
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block p-2 rounded border border-[#1e3a5f] bg-[#0f172a] hover:bg-[#1a2847] transition hover:border-cyan-400/50 group"
+              className="block p-2 rounded border border-[#3a1d24] bg-[#140b0f] hover:bg-[#2b171d] transition hover:border-[#d4b36a]/50 group"
             >
               {item.image && (
-                <div className="mb-2 h-20 w-full overflow-hidden rounded bg-[#1e3a5f]">
+                <div className="mb-2 h-20 w-full overflow-hidden rounded bg-[#3a1d24]">
                   <img
                     src={item.image}
                     alt={item.title}
@@ -71,12 +71,12 @@ export default function NewsPanel() {
                   />
                 </div>
               )}
-              <h3 className="text-xs font-semibold text-slate-200 line-clamp-2 group-hover:text-cyan-400 transition">
+              <h3 className="text-xs font-semibold text-slate-200 line-clamp-2 group-hover:text-[#d4b36a] transition">
                 {item.title}
               </h3>
               <p className="text-[10px] text-slate-500 mt-1 line-clamp-1">{item.description}</p>
               <div className="flex justify-between items-center mt-2">
-                <span className="text-[9px] text-cyan-400 font-mono">{item.source}</span>
+                <span className="text-[9px] text-[#d4b36a] font-mono">{item.source}</span>
                 <span className="text-[9px] text-slate-600">
                   {new Date(item.publishedAt).toLocaleTimeString()}
                 </span>
