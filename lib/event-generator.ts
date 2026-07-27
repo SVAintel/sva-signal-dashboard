@@ -151,9 +151,18 @@ export async function generateMockEvents(): Promise<Event[]> {
 
   const finalEvents = events.length > 0 ? events : getFallbackEvents();
 
-  // Run every pulled signal through the AI analyst so each gets a unique,
-  // event-specific assessment instead of a generic canned blurb.
-  await enrichEventsWithAIAssessments(finalEvents);
+  // Free-tier Gemini quota is only 20 requests/day total (shared with chat features),
+  // so we can't run every signal through the AI analyst — instead prioritize the
+  // highest-severity signals each refresh and give the rest the canned fallback notes.
+  const severityRank: Record<string, number> = {
+    war: 0, nuclear: 1, biological: 2, counter_terrorism: 3, political_unrest: 4,
+    cyber: 5, energy: 6, humanitarian: 7, natural_disaster: 8, market: 9,
+  };
+  const priorityEvents = [...finalEvents]
+    .sort((a, b) => (severityRank[a.category] ?? 10) - (severityRank[b.category] ?? 10))
+    .slice(0, 5);
+
+  await enrichEventsWithAIAssessments(priorityEvents);
 
   return finalEvents;
 }
@@ -162,7 +171,7 @@ export async function generateMockEvents(): Promise<Event[]> {
 // articles across refreshes don't re-burn rate limit), limited concurrency, and a
 // retry-with-backoff on 429s. Falls back to canned notes if the AI call still fails.
 const aiAssessmentCache = new Map<string, { notes: string; watchPoints: string[]; expires: number }>();
-const AI_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const AI_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — conserve scarce free-tier quota
 const AI_CONCURRENCY = 3;
 
 function cacheKeyFor(event: Event): string {
@@ -186,7 +195,7 @@ async function callGeminiForEvent(event: Event, conflictSummary: string): Promis
     `"watchPoints": ["<specific indicator 1>", "<specific indicator 2>", "<specific indicator 3>", ` +
     `"<specific indicator 4>", "<specific indicator 5>", "<specific indicator 6>"]}`;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 1; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
