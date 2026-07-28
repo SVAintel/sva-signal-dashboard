@@ -9,6 +9,11 @@ const NHC_URL = "https://www.nhc.noaa.gov/CurrentStorms.json";
 
 // Advisories are issued roughly every 6h (more often near landfall), so a
 // 15-min revalidate window is frequent enough without hammering NOAA.
+// This route has no dynamic API usage of its own, so without force-dynamic
+// Next.js treats it as a STATIC route handler that relies entirely on ISR
+// background revalidation to refresh — unreliable in production. force-dynamic
+// makes the handler run per-request while the inner fetch keeps its own cache.
+export const dynamic = "force-dynamic";
 export const revalidate = 900;
 
 interface StormFeature {

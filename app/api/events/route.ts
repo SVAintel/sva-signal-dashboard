@@ -1,10 +1,15 @@
 import { generateMockEvents } from "@/lib/event-generator";
 
-// Underlying external APIs (NewsAPI especially) have strict daily quotas, so this
-// route relies on fetch-level revalidation inside event-generator.ts rather than
-// force-dynamic — it stays "live" on a rolling window without exhausting quotas.
-// This outer window just controls how often the aggregation re-runs; the
-// individual source fetches carry their own longer, quota-safe cache windows.
+// Underlying external APIs (NewsAPI especially) have strict daily quotas, so the
+// individual source fetches inside event-generator.ts carry their own longer,
+// quota-safe `next: { revalidate }` windows via Vercel's Data Cache. This route
+// itself has no dynamic API usage (no cookies/headers/searchParams), which means
+// Next.js would otherwise treat it as a STATIC route handler prerendered once at
+// build time — relying entirely on ISR background revalidation to refresh, which
+// isn't reliably triggering on this deployment and was serving a stale build-time
+// snapshot indefinitely. force-dynamic makes the handler itself run per-request
+// while the inner fetches still respect their quota-safe cache windows.
+export const dynamic = "force-dynamic";
 export const revalidate = 900;
 
 export async function GET() {

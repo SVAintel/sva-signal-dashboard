@@ -5,6 +5,12 @@ const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 // NewsAPI's free tier caps out at 100 requests/24h, shared across this route
 // AND the two NewsAPI calls inside lib/event-generator.ts. Set generously long
 // (4h) so combined usage across all 3 call sites stays well under quota.
+// This route has no dynamic API usage of its own, so without force-dynamic
+// Next.js treats it as a STATIC route handler baked in at build time and never
+// reliably refreshed via ISR. force-dynamic forces per-request execution of
+// the aggregation logic here, while the inner fetch() calls still rely on
+// their own `next: { revalidate }` windows for quota safety.
+export const dynamic = "force-dynamic";
 export const revalidate = 14400;
 
 interface NewsItem {

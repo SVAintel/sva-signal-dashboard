@@ -90,6 +90,7 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [lastFetchError, setLastFetchError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
   const [mobileView, setMobileView] = useState<"panel" | "map">("map");
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
@@ -177,8 +178,12 @@ export default function Dashboard() {
           timeZoneName: "short",
         })
       );
+      setLastFetchError("");
     } catch (error) {
       console.error("Failed to fetch events:", error);
+      setLastFetchError(
+        error instanceof Error ? error.message : "Failed to fetch events"
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -342,6 +347,14 @@ export default function Dashboard() {
           <span className="ml-2 hidden shrink-0 text-[10px] text-slate-600 sm:inline whitespace-nowrap">
             UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
           </span>
+          {lastFetchError && (
+            <span
+              className="ml-2 hidden shrink-0 text-[10px] font-bold text-red-500 sm:inline whitespace-nowrap"
+              title={lastFetchError}
+            >
+              UPDATE FAILED — SHOWING STALE DATA
+            </span>
+          )}
           <AmbientAudio />
         </div>
       </header>

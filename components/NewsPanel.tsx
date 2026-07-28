@@ -15,15 +15,25 @@ interface NewsItem {
 export default function NewsPanel() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastFetchError, setLastFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchNews = async () => {
       try {
         const response = await fetch("/api/news");
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
         const data = await response.json();
         setNews(data.slice(0, 30));
+        setLastUpdated(new Date());
+        setLastFetchError(null);
       } catch (error) {
         console.error("Failed to fetch news:", error);
+        setLastFetchError(
+          error instanceof Error ? error.message : "Failed to fetch news"
+        );
       } finally {
         setLoading(false);
       }
@@ -43,6 +53,15 @@ export default function NewsPanel() {
           <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Live News</h2>
         </div>
         <p className="text-[10px] text-slate-600 mt-1">Global Intelligence Feed</p>
+        {lastFetchError ? (
+          <p className="text-[10px] text-red-500 mt-1">
+            Update failed{lastUpdated ? ` — showing data from ${lastUpdated.toLocaleTimeString()}` : ""}: {lastFetchError}
+          </p>
+        ) : lastUpdated ? (
+          <p className="text-[10px] text-slate-700 mt-1">
+            Updated {lastUpdated.toLocaleTimeString()}
+          </p>
+        ) : null}
       </div>
 
       {/* News Feed */}

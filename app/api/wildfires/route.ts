@@ -11,6 +11,11 @@ const FIRMS_URL =
 // FIRMS updates a handful of times per day as satellite passes come in —
 // an hourly revalidate window is more than fresh enough and keeps us well
 // under any fair-use concerns for the public feed.
+// This route has no dynamic API usage of its own, so without force-dynamic
+// Next.js treats it as a STATIC route handler that relies entirely on ISR
+// background revalidation to refresh — unreliable in production. force-dynamic
+// makes the handler run per-request while the inner fetch keeps its own cache.
+export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
 interface WildfireFeature {
