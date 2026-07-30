@@ -12,12 +12,39 @@ const YOUTUBE_SEARCH_API_KEY = process.env.YOUTUBE_SEARCH_API_KEY || YOUTUBE_API
 export const revalidate = 1800;
 
 const CHANNELS = [
-  { name: "Al Jazeera", channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg", region: "GLOBAL" },
+  // Al Jazeera runs its own Brightcove-hosted live player (found on
+  // aljazeera.com/video/live) that's freely embeddable and independent of
+  // YouTube's embed restrictions — use it directly instead of the YouTube
+  // fallback, since YouTube now rejects embedding several of these news
+  // channels' live streams with "Error 153" (embedding disabled by the
+  // channel, or stricter origin checks — outside our control).
+  {
+    name: "Al Jazeera",
+    channelId: "UCNye-wNBqNL5ZzHSJj3l8Bg",
+    region: "GLOBAL",
+    // autoplay=true + muted=true matches the other channels' muted-autoplay
+    // behavior — browsers block unmuted autoplay, so it must start muted.
+    directEmbedUrl: "https://players.brightcove.net/665003303001/AvByVmBYDu_default/index.html?videoId=6368602483112&autoplay=true&muted=true",
+  },
+  // NHK World-Japan and CGTN both publish official, unauthenticated HLS live
+  // feeds directly from their own infrastructure (nhkworld.jp / Amagi-Rakuten
+  // FAST syndication for CGTN) — verified reachable and genuinely live.
+  // These bypass YouTube entirely, same rationale as Al Jazeera above.
+  {
+    name: "NHK World",
+    channelId: "",
+    region: "ASIA",
+    hlsUrl: "https://masterpl.hls.nhkworld.jp/hls/w/live/smarttv.m3u8",
+  },
+  {
+    name: "CGTN",
+    channelId: "",
+    region: "ASIA",
+    hlsUrl: "https://amg00405-rakutentv-cgtn-rakuten-i9tar.amagi.tv/master.m3u8",
+  },
   { name: "DW News",    channelId: "UCknLrEdhRCp1aegoMqRaCZg", region: "EUROPE" },
   { name: "France 24",  channelId: "UCQfwfsi5VrQ8yKZ-UWmAEFg", region: "EUROPE" },
   { name: "Sky News",   channelId: "UCoMdktPbSTixAyNGwb-UYkQ", region: "UK"     },
-  { name: "WION",       channelId: "UCVFiKFMPOWVhGelNMXLRxSA", region: "ASIA"   },
-  { name: "NewsNation", channelId: "UCX4RNV1UzR-_bMGFSB7KxDA", region: "US"     },
   { name: "Fox News",   channelId: "UCXIJgqnII2ZOINSWNOGFThA", region: "US"     },
   { name: "CNN",        channelId: "UCupvZG-5ko_eiXAupbDfxWw", region: "US"     },
 ];
@@ -39,7 +66,13 @@ async function getLiveVideoId(channelId: string): Promise<string | null> {
     if (!res.ok) return null;
     const html = await res.text();
     if (!html.includes('"isLive":true')) return null;
-    const match = html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]+)"/);
+    // YouTube has changed this page's internal JSON structure over time. The
+    // old "videoDetails":{"videoId":"..."} anchor no longer exists, and a
+    // bare `"videoId":"..."` grab is unreliable (it can match a *related*
+    // video's endpoint instead of the one actually playing). The
+    // `currentVideoEndpoint` block is the one YouTube's own player uses to
+    // know what's currently loaded, so anchor on that instead.
+    const match = html.match(/"currentVideoEndpoint":\{[^}]*"url":"\/watch\?v=([a-zA-Z0-9_-]{11})/);
     return match ? match[1] : null;
   } catch {
     return null;
@@ -76,8 +109,19 @@ async function searchLiveVideos(query: string): Promise<{ results: SearchResult[
       };
     }
     const items = data.items || [];
+    // Dedupe by channel — a single channel can post multiple live streams
+    // matching the same keyword (e.g. NHK World appearing 3x), which just
+    // clutters the unverified search results. Keep only the most relevant
+    // (first) video per channel.
+    const seenChannels = new Set<string>();
+    const deduped = items.filter((it: any) => {
+      const channel = it.snippet.channelTitle;
+      if (seenChannels.has(channel)) return false;
+      seenChannels.add(channel);
+      return true;
+    });
     return {
-      results: items.map((it: any) => ({
+      results: deduped.map((it: any) => ({
         videoId: it.id.videoId,
         title: it.snippet.title,
         channelTitle: it.snippet.channelTitle,
@@ -105,7 +149,11 @@ export async function GET(req: NextRequest) {
       name: ch.name,
       region: ch.region,
       channelId: ch.channelId,
-      videoId: await getLiveVideoId(ch.channelId),
+      directEmbedUrl: (ch as any).directEmbedUrl ?? null,
+      hlsUrl: (ch as any).hlsUrl ?? null,
+      // Skip the YouTube live-detection scrape entirely for channels with a
+      // direct broadcaster embed — we don't need a YouTube videoId for them.
+      videoId: (ch as any).directEmbedUrl || (ch as any).hlsUrl ? null : await getLiveVideoId(ch.channelId),
     }))
   );
 

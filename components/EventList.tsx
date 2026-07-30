@@ -1,6 +1,16 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Event } from "@/lib/types";
+
+type VerificationFilter = "all" | "confirmed" | "unconfirmed";
+
+// Telegram is scraped OSINT/war-monitor chatter, not a vetted news source —
+// treat it as "unconfirmed". Every other source (wire APIs, RSS outlets,
+// ACLED, GDELT, USGS/EMSC, etc.) is treated as "confirmed".
+function isUnconfirmed(source: string): boolean {
+  return source.startsWith("Telegram");
+}
 
 const categoryMeta: Record<string, { label: string; color: string; bg: string }> = {
   war:               { label: "WAR",     color: "#ef4444", bg: "#1a0a0a" },
@@ -32,6 +42,15 @@ export default function EventList({
   onSelectEvent: (event: Event | null) => void;
   selectedEvent: Event | null;
 }) {
+  const [verification, setVerification] = useState<VerificationFilter>("all");
+
+  const filteredEvents = useMemo(() => {
+    if (verification === "all") return events;
+    return events.filter((e) =>
+      verification === "unconfirmed" ? isUnconfirmed(e.source) : !isUnconfirmed(e.source)
+    );
+  }, [events, verification]);
+
   if (loading) {
     return (
       <div className="flex-1 p-4">
@@ -48,19 +67,36 @@ export default function EventList({
     <div className="flex flex-col">
       {/* Sidebar header */}
       <div className="border-b border-[#3a3a3a] px-4 py-2">
-        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-          Signal Feed
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+            Signal Feed
+          </div>
+          <div className="flex items-center gap-1">
+            {(["all", "confirmed", "unconfirmed"] as VerificationFilter[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setVerification(v)}
+                className={`rounded border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ${
+                  verification === v
+                    ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                    : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Event list */}
       <div>
-        {events.length === 0 && (
+        {filteredEvents.length === 0 && (
           <div className="p-6 text-center text-xs text-slate-600 uppercase tracking-widest">
             No signals detected
           </div>
         )}
-        {events.map((event) => {
+        {filteredEvents.map((event) => {
           const meta = categoryMeta[event.category] || categoryMeta.war;
           const isSelected = selectedEvent?.id === event.id;
           return (

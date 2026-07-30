@@ -76,7 +76,7 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
   return (
     <div className="flex h-full flex-col p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#d4b36a]">AI Analyst</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#d4b36a]">SVA Analyst</h2>
         <span className="text-[10px] text-slate-500">{events.length} active signals</span>
       </div>
 

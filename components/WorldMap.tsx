@@ -5,7 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const makeIcon = (color: string) =>
@@ -291,6 +291,171 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
   return null;
 }
 
+// Flies the map to a selected event's location and zooms in, so opening the
+// detail panel visually centers the underlying story on the map instead of
+// leaving the user to hunt for it among other markers. Restores the prior
+// view (center + zoom) when the detail panel is closed.
+function MapEventFocuser({ event }: { event: Event | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (event) {
+      // Only snapshot the view the first time we focus (not on every event
+      // change while the panel stays open) so closing always returns to
+      // where the user was before they started exploring events.
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const targetZoom = Math.max(map.getZoom(), 6);
+      map.flyTo([event.location.lat, event.location.lng], targetZoom, { duration: 0.9 });
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [event?.id, map]);
+
+  return null;
+}
+
+// Fires three quick expanding radar rings from a selected event's marker out
+// toward the edge of the map — a brief "detected" pulse once the fly-to zoom
+// settles. Rendered into the same dedicated sweep pane (z-index 550) used by
+// the radar sweep line, via a portal + counter-transformed anchor so plain
+// container-pixel math (ring center) stays valid across pan/zoom.
+// Rings grow via a per-frame JS-driven width/height (not a CSS transform:scale)
+// so the border stays a constant thin hairline — like the radar sweep line —
+// instead of visually thickening as border-width gets multiplied by scale.
+const RING_COUNT = 4;
+const RING_STAGGER_MS = 420; // significantly slower stagger between rings
+const RING_START_SIZE = 16;
+const RING_GROW_MS = 3200; // significantly slower expand/fade per ring
+const RING_BORDER_PX = 1; // constant hairline thickness, independent of ring size
+
+const EventPingRings = memo(function EventPingRings({ event }: { event: Event | null }) {
+  const map = useMap();
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [pane, setPane] = useState<HTMLElement | null>(null);
+  const ringElRefs = useRef(new Map<string, HTMLDivElement>());
+  const [rings, setRings] = useState<
+    { id: string; x: number; y: number; maxSize: number; startAt: number }[]
+  >([]);
+  const ringsRef = useRef<typeof rings>([]);
+  useEffect(() => {
+    ringsRef.current = rings;
+  }, [rings]);
+
+  useEffect(() => {
+    let p = map.getPane("sweepPane");
+    if (!p) {
+      p = map.createPane("sweepPane");
+      p.style.zIndex = "550";
+      p.style.pointerEvents = "none";
+    }
+    setPane(p);
+  }, [map]);
+
+  useEffect(() => {
+    // Depend on `pane` too: the anchor div only mounts once `pane` is ready
+    // (the component renders null before then), so gating on `[map]` alone
+    // would start this loop before anchorRef.current ever exists and never
+    // retry — leaving rings frozen at their initial size/opacity forever.
+    let raf: number;
+    const update = () => {
+      if (anchorRef.current) {
+        const origin = map.containerPointToLayerPoint([0, 0]);
+        anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+      }
+      // Drive each active ring's size/opacity directly from elapsed time —
+      // keeps the border a constant thin width the whole way out instead of
+      // it being stretched by a CSS transform:scale.
+      const now = performance.now();
+      ringElRefs.current.forEach((el, id) => {
+        const r = ringsRef.current.find((x) => x.id === id);
+        if (!r) return;
+        const elapsed = now - r.startAt;
+        if (elapsed < 0) return;
+        const t = Math.min(elapsed / RING_GROW_MS, 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        const size = RING_START_SIZE + (r.maxSize - RING_START_SIZE) * eased;
+        const opacity = Math.max(0, 0.7 * (1 - t));
+        el.style.width = `${size}px`;
+        el.style.height = `${size}px`;
+        el.style.left = `${r.x - size / 2}px`;
+        el.style.top = `${r.y - size / 2}px`;
+        el.style.opacity = `${opacity}`;
+      });
+      raf = requestAnimationFrame(update);
+    };
+    raf = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(raf);
+  }, [map, pane]);
+
+  useEffect(() => {
+    if (!event) return;
+    // Wait for the flyTo (see MapEventFocuser, ~900ms) to settle so the rings
+    // emanate from the marker's final on-screen position, not a mid-flight one.
+    const startTimer = setTimeout(() => {
+      const pt = map.latLngToContainerPoint([event.location.lat, event.location.lng]);
+      const size = map.getSize();
+      // Diagonal distance from the marker to the farthest corner, so the ring
+      // reliably reaches the edge of the map regardless of where it sits.
+      const maxDist = Math.max(
+        Math.hypot(pt.x, pt.y),
+        Math.hypot(size.x - pt.x, pt.y),
+        Math.hypot(pt.x, size.y - pt.y),
+        Math.hypot(size.x - pt.x, size.y - pt.y)
+      );
+      const maxSize = maxDist * 2.1;
+      const stamp = Date.now();
+      const now = performance.now();
+      setRings(
+        Array.from({ length: RING_COUNT }, (_, i) => ({
+          id: `${event.id}-${stamp}-${i}`,
+          x: pt.x,
+          y: pt.y,
+          maxSize,
+          startAt: now + i * RING_STAGGER_MS,
+        }))
+      );
+      const clearTimer = setTimeout(
+        () => setRings([]),
+        (RING_COUNT - 1) * RING_STAGGER_MS + RING_GROW_MS + 300
+      );
+      return () => clearTimeout(clearTimer);
+    }, 950);
+    return () => clearTimeout(startTimer);
+  }, [event?.id, map]);
+
+  if (!pane) return null;
+
+  return createPortal(
+    <div ref={anchorRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+      {rings.map((r) => (
+        <div
+          key={r.id}
+          ref={(el) => {
+            if (el) ringElRefs.current.set(r.id, el);
+            else ringElRefs.current.delete(r.id);
+          }}
+          className="event-ping-ring"
+          style={{
+            position: "absolute",
+            left: r.x - RING_START_SIZE / 2,
+            top: r.y - RING_START_SIZE / 2,
+            width: RING_START_SIZE,
+            height: RING_START_SIZE,
+            borderWidth: RING_BORDER_PX,
+            opacity: 0,
+          }}
+        />
+      ))}
+    </div>,
+    pane
+  );
+});
+
 // Radar-style sweep: a thin grid overlay with a bright vertical line that pulses
 // left-to-right across the map on a loop. When the sweep front crosses an
 // event marker's on-screen position, that event "reveals" — a brief expanding
@@ -554,6 +719,10 @@ export default function WorldMap({
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
   const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS.map((p) => ({ ...p, country: "N/A", size: "Unknown" }));
+  // Track each event marker's Leaflet instance so we can programmatically
+  // close its popup (e.g. right when "Expand" is clicked and the map begins
+  // flying/zooming into it — the popup would otherwise linger awkwardly).
+  const markerRefs = useRef(new Map<string, L.Marker>());
 
   return (
     <MapContainer
@@ -567,6 +736,7 @@ export default function WorldMap({
       zoomControl={false}
     >
       <MapFitter visible={mobileVisible} />
+      <MapEventFocuser event={selectedEvent} />
       <ScanSweep events={events} />
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
@@ -701,6 +871,10 @@ export default function WorldMap({
           key={event.id}
           position={[event.location.lat, event.location.lng]}
           icon={icons[event.category] || icons.war}
+          ref={(m) => {
+            if (m) markerRefs.current.set(event.id, m);
+            else markerRefs.current.delete(event.id);
+          }}
           eventHandlers={{
             // Bring the clicked marker to the front of the marker pane so it's
             // visible above every other marker layer (naval, bases, wildfires,
@@ -720,7 +894,14 @@ export default function WorldMap({
               <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{event.title}</div>
               <div style={{ color: "#64748b", fontSize: "11px" }}>{event.source}</div>
               <button
-                onClick={() => onSelectEvent(event)}
+                onClick={() => {
+                  // Close the popup immediately — the map is about to fly/zoom
+                  // in on this marker and the side detail panel takes over as
+                  // the source of truth, so the small popup bubble would just
+                  // sit awkwardly over the marker otherwise.
+                  markerRefs.current.get(event.id)?.closePopup();
+                  onSelectEvent(event);
+                }}
                 style={{
                   marginTop: "8px",
                   width: "100%",
@@ -742,6 +923,7 @@ export default function WorldMap({
           </Popup>
         </Marker>
       ))}
+      <EventPingRings event={selectedEvent} />
     </MapContainer>
   );
 }

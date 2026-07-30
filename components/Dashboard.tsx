@@ -30,6 +30,14 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
 };
 
 type SidebarTab = "events" | "news" | "stocks" | "analyst";
+
+// Time-range filter options for the map's recency selector.
+const TIME_RANGES: { label: string; hours: number | null }[] = [
+  { label: "12H", hours: 12 },
+  { label: "24H", hours: 24 },
+  { label: "48H", hours: 48 },
+  { label: "ALL", hours: null },
+];
 type MapLayerKey =
   | "tradeRoutes"
   | "conflictZones"
@@ -82,10 +90,18 @@ type Storm = {
 };
 
 export default function Dashboard() {
-  const { activeCategories, toggleCategory, setAllCategories, setDashboardActive } = useStore();
+  const {
+    activeCategories,
+    toggleCategory,
+    setAllCategories,
+    setDashboardActive,
+    activeTimeRangeHours,
+    setActiveTimeRangeHours,
+  } = useStore();
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showInitOverlay, setShowInitOverlay] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
@@ -113,25 +129,22 @@ export default function Dashboard() {
     storms: false,
   });
 
-  // Resizable panel state — sidebar width (drag divider between sidebar/map)
-  // and live-feed height (drag divider between signals list and broadcasts).
-  const [sidebarWidth, setSidebarWidth] = useState(420);
-  const [liveFeedHeight, setLiveFeedHeight] = useState(260);
-  const dragStateRef = useRef<{ type: "sidebar" | "liveFeed"; startPos: number; startSize: number } | null>(null);
+  // Resizable panel state — sidebar width (drag divider between sidebar/map).
+  // The live-feed panel no longer has its own drag handle: since the video
+  // area is always a fixed 16:9 box (to avoid letterboxing), a separate
+  // draggable height for it doesn't do anything useful anymore.
+  // 480 (not 420) so the Live Broadcasts channel-button row (3 quick-pick
+  // buttons + "More" dropdown) fits on one line by default without wrapping.
+  const [sidebarWidth, setSidebarWidth] = useState(480);
+  const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(false);
+  const dragStateRef = useRef<{ startPos: number; startSize: number } | null>(null);
 
   const handleDragMove = useCallback((e: MouseEvent) => {
     const drag = dragStateRef.current;
     if (!drag) return;
-    if (drag.type === "sidebar") {
-      const delta = e.clientX - drag.startPos;
-      const next = Math.min(720, Math.max(300, drag.startSize + delta));
-      setSidebarWidth(next);
-    } else {
-      // Live feed divider: dragging up (negative delta) grows the feed since it sits at the bottom.
-      const delta = drag.startPos - e.clientY;
-      const next = Math.min(600, Math.max(140, drag.startSize + delta));
-      setLiveFeedHeight(next);
-    }
+    const delta = e.clientX - drag.startPos;
+    const next = Math.min(720, Math.max(300, drag.startSize + delta));
+    setSidebarWidth(next);
   }, []);
 
   const handleDragEnd = useCallback(() => {
@@ -142,14 +155,10 @@ export default function Dashboard() {
     window.removeEventListener("mouseup", handleDragEnd);
   }, [handleDragMove]);
 
-  const startDrag = (type: "sidebar" | "liveFeed") => (e: React.MouseEvent) => {
+  const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
-    dragStateRef.current = {
-      type,
-      startPos: type === "sidebar" ? e.clientX : e.clientY,
-      startSize: type === "sidebar" ? sidebarWidth : liveFeedHeight,
-    };
-    document.body.style.cursor = type === "sidebar" ? "col-resize" : "row-resize";
+    dragStateRef.current = { startPos: e.clientX, startSize: sidebarWidth };
+    document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("mousemove", handleDragMove);
     window.addEventListener("mouseup", handleDragEnd);
@@ -273,8 +282,16 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [activeLayers.storms]);
 
-  // Client-side filter by active categories
-  const events = allEvents.filter((e) => activeCategories.includes(e.category));
+  // Client-side filter by active categories, then by recency (time-range
+  // selector). `activeTimeRangeHours === null` means no time filter (show
+  // events of any age).
+  const events = allEvents
+    .filter((e) => activeCategories.includes(e.category))
+    .filter((e) => {
+      if (activeTimeRangeHours === null) return true;
+      const ageMs = Date.now() - new Date(e.timestamp).getTime();
+      return ageMs <= activeTimeRangeHours * 60 * 60 * 1000;
+    });
 
   const allOn = activeCategories.length === ALL_CATEGORIES.length;
 
@@ -385,9 +402,9 @@ export default function Dashboard() {
                 }`}
               >
                 {tab === "events" && "SIGNALS"}
-                {tab === "news" && "NEWS"}
+                {tab === "news" && "INSIGHTS"}
                 {tab === "stocks" && "MARKETS"}
-                {tab === "analyst" && "AI ANALYST"}
+                {tab === "analyst" && "SVA ANALYST"}
               </button>
             ))}
           </div>
@@ -395,43 +412,66 @@ export default function Dashboard() {
           {/* Tab Content */}
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
             {activeTab === "events" && (
-              <>
-                {/* Signals — fills remaining space, scrollable */}
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  <EventList
-                    events={events}
-                    loading={loading}
-                    onSelectEvent={handleEventSelect}
-                    selectedEvent={selectedEvent}
-                  />
-                </div>
-                {/* Drag handle to resize the live feed panel height (desktop only — mobile keeps natural height) */}
-                <div
-                  onMouseDown={startDrag("liveFeed")}
-                  className="hidden md:block h-1.5 shrink-0 cursor-row-resize bg-[#1e1e1e] hover:bg-[#d4b36a]/40 transition"
-                  title="Drag to resize live feed"
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <EventList
+                  events={events}
+                  loading={loading}
+                  onSelectEvent={handleEventSelect}
+                  selectedEvent={selectedEvent}
                 />
-                {/* Live feed — explicit resizable height on desktop, natural height on mobile */}
-                <div className="shrink-0 overflow-y-auto md:block" style={{ maxHeight: liveFeedHeight + 160 }}>
-                  <LiveBroadcasts videoHeight={liveFeedHeight} />
-                </div>
-              </>
+              </div>
             )}
             {activeTab === "news" && <NewsPanel />}
             {activeTab === "stocks" && <StockMarketPanel />}
             {activeTab === "analyst" && <AIAnalystPanel events={events} />}
           </div>
+
+          {/* Live Streams — its own container, independent of the active tab,
+              so it stays visible no matter which tab (Signals/Global
+              Analysis/Markets/AI Analyst) is selected. The collapse toggle
+              lives inside LiveBroadcasts itself, on the Curated/Search row.
+              No drag handle here anymore — the video area is now a fixed
+              16:9 box, so a draggable height no longer had any effect. */}
+          <div className="shrink-0 flex flex-col border-t border-[#3a3a3a]">
+            <div className="shrink-0 overflow-y-auto md:block">
+              <LiveBroadcasts
+                collapsed={liveFeedCollapsed}
+                onToggleCollapsed={() => setLiveFeedCollapsed((v) => !v)}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Drag handle to resize the sidebar width (desktop only) */}
         <div
-          onMouseDown={startDrag("sidebar")}
+          onMouseDown={startDrag}
           className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-[#1e1e1e] hover:bg-[#d4b36a]/40 transition"
           title="Drag to resize panel"
         />
 
         {/* Map - on RIGHT (desktop) / toggled full-screen panel (mobile) */}
         <div className={`relative flex-1 md:block ${mobileView === "map" ? "block" : "hidden"}`}>
+          {/* Time-range selector — filters map/signal events by recency */}
+          <div className="absolute left-2 top-2 z-[999] flex gap-1 sm:left-4 sm:top-4">
+            {TIME_RANGES.map((tr) => {
+              const isOn = activeTimeRangeHours === tr.hours;
+              return (
+                <button
+                  key={tr.label}
+                  onClick={() => setActiveTimeRangeHours(tr.hours)}
+                  title={tr.hours === null ? "Show events of any age" : `Show events from the last ${tr.label}`}
+                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest backdrop-blur transition sm:px-2 sm:text-[10px] ${
+                    isOn
+                      ? "border-[#d4b36a] text-[#d4b36a] bg-[#1e1e1e]"
+                      : "border-slate-700 bg-[#0e0e0ecc] text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {tr.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Map legend — collapsed to a compact strip on mobile to save screen space */}
           <div className="absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
             {Object.entries(categoryLabels).map(([key, val]) => (
@@ -531,20 +571,56 @@ export default function Dashboard() {
             onSelectConflictZone={setSelectedConflictZone}
             mobileVisible={mobileView === "map"}
           />
+
+          {/* Event Detail Panel — docked to the right edge of the map, scrollable */}
+          <EventDetailPanel
+            event={selectedEvent}
+            onClose={handleCloseDetail}
+          />
         </div>
       </div>
-
-      {/* Event Detail Modal */}
-      <EventDetailPanel
-        event={selectedEvent}
-        onClose={handleCloseDetail}
-      />
 
       {/* Conflict Zone Detail Modal */}
       <ConflictZoneDetailPanel
         zone={selectedConflictZone}
         onClose={() => setSelectedConflictZone(null)}
       />
+
+      {/* Initialization overlay — blurs the dashboard behind it while the
+          first data fetch is in flight, then flips to a green "ready" state
+          the user dismisses with a click. */}
+      {showInitOverlay && (
+        <div
+          className={`fixed inset-0 z-[99999] flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity ${
+            loading ? "cursor-default" : "cursor-pointer"
+          }`}
+          onClick={() => {
+            if (!loading) setShowInitOverlay(false);
+          }}
+        >
+          <div className="flex flex-col items-center gap-4 rounded border border-[#3a3a3a] bg-[#0e0e0ef2] px-10 py-8 text-center shadow-2xl">
+            <div
+              className={`h-3 w-3 rounded-full ${loading ? "animate-pulse bg-[#d4b36a]" : "bg-emerald-400"}`}
+              style={{ boxShadow: loading ? "0 0 10px #d4b36a" : "0 0 10px #34d399" }}
+            />
+            <p
+              className={`text-sm font-bold uppercase tracking-[0.25em] ${
+                loading ? "text-[#d4b36a]" : "text-emerald-400"
+              }`}
+            >
+              {loading ? "Initializing Data…" : "Initialized"}
+            </p>
+            {loading && (
+              <div className="h-1 w-56 overflow-hidden rounded-full bg-[#3a3a3a]">
+                <div className="init-loading-bar h-full w-1/3 rounded-full bg-[#d4b36a]" style={{ boxShadow: "0 0 8px #d4b36a" }} />
+              </div>
+            )}
+            {!loading && (
+              <p className="text-[10px] uppercase tracking-widest text-slate-500">Click to continue</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,10 @@ interface StoreState {
   setAllCategories: (categories: string[]) => void;
   dashboardActive: boolean;
   setDashboardActive: (active: boolean) => void;
+  // Time-range filter for map/signal events, in hours. `null` means no
+  // filter (show all events regardless of age).
+  activeTimeRangeHours: number | null;
+  setActiveTimeRangeHours: (hours: number | null) => void;
 }
 
 const ALL_CATEGORIES = ["war", "counter_terrorism", "natural_disaster", "market", "biological", "political_unrest", "cyber", "nuclear", "energy", "humanitarian"];
@@ -21,6 +25,8 @@ export const useStore = create<StoreState>((set) => ({
   setAllCategories: (categories) => set({ activeCategories: categories }),
   dashboardActive: false,
   setDashboardActive: (active) => set({ dashboardActive: active }),
+  activeTimeRangeHours: null, // default: show all events, no time filter
+  setActiveTimeRangeHours: (hours) => set({ activeTimeRangeHours: hours }),
 }));
 
 export { ALL_CATEGORIES };

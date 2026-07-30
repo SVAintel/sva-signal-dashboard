@@ -95,6 +95,37 @@ body {
   animation: scan-label-fade 1.8s ease-in-out forwards;
 }
 
+/* Quick radar "detected" ping rings — expand from an event marker out to the
+   edge of the map when its detail panel is opened. Sizing/opacity are driven
+   directly by JS each frame (see EventPingRings in WorldMap.tsx) rather than
+   a CSS transform:scale, so the border stays a constant thin hairline (like
+   the radar sweep line) instead of visually thickening as it grows. */
+.event-ping-ring {
+  border-radius: 50%;
+  border-style: solid;
+  border-color: #d4b36a;
+  /* Same glow strength as the radar sweep line's halo (see the sweep bar's
+     boxShadow in WorldMap.tsx) so the ping rings read as part of the same
+     radar visual language. */
+  box-shadow: 0 0 16px 3px rgba(212, 179, 106, 0.6);
+  will-change: width, height, opacity;
+}
+
+/* Indeterminate progress bar shown in the "Initializing Data…" overlay while
+   the first data fetch is in flight (duration is unknown, so this loops a
+   sliding highlight rather than tracking real percentage). */
+@keyframes init-loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.init-loading-bar {
+  animation: init-loading-bar 1.1s ease-in-out infinite;
+}
+
 /* Leaflet markers/paths get a native browser focus outline on click (white
    ring by default) — replace it with a thin gold ring to match the theme. */
 .leaflet-container path:focus,

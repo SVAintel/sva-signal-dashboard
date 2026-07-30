@@ -77,143 +77,139 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
   const categoryColor = getCategoryColor(event.category);
 
   return (
-    <>
-      <div className="fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
-        <div className="pointer-events-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded border border-[#d4b36a]/30 bg-[#0e0e0e] shadow-2xl">
-          <div className="sticky top-0 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#0f0f0f] px-6 py-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="h-3 w-3 rounded-full" style={{ background: categoryColor, boxShadow: `0 0 8px ${categoryColor}` }} />
-                <span className="text-xs font-bold uppercase text-[#d4b36a]">{event.category.replace(/_/g, " ")}</span>
-                <span className="text-xs text-slate-600">•</span>
-                <span className="text-xs text-slate-500">{event.source}</span>
-              </div>
-              <h1 className="text-xl font-bold text-slate-100">{event.title}</h1>
+    <div className="absolute inset-y-0 right-0 z-[1200] flex w-full max-w-full sm:max-w-[420px] pointer-events-none">
+      <div className="pointer-events-auto flex h-full w-full flex-col overflow-y-auto border-l border-[#d4b36a]/30 bg-[#0e0e0ef5] shadow-2xl backdrop-blur-sm">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#0f0f0f] px-5 py-4">
+          <div className="flex-1 pr-2">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-3 w-3 rounded-full" style={{ background: categoryColor, boxShadow: `0 0 8px ${categoryColor}` }} />
+              <span className="text-xs font-bold uppercase text-[#d4b36a]">{event.category.replace(/_/g, " ")}</span>
+              <span className="text-xs text-slate-600">•</span>
+              <span className="text-xs text-slate-500">{event.source}</span>
             </div>
-            <button onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-[#262626] hover:text-[#d4b36a] transition">
-              <X size={20} />
-            </button>
+            <h1 className="text-lg font-bold text-slate-100 leading-snug">{event.title}</h1>
+          </div>
+          <button onClick={onClose} className="shrink-0 rounded p-2 text-slate-400 hover:bg-[#262626] hover:text-[#d4b36a] transition">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-6">
+          <div className="grid grid-cols-3 gap-3 pb-4 border-b border-[#3a3a3a]">
+            <div>
+              <p className="text-xs text-slate-600 uppercase font-semibold">Location</p>
+              <p className="text-sm text-slate-200 mt-1">{event.location.lat.toFixed(2)}°, {event.location.lng.toFixed(2)}°</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-600 uppercase font-semibold">Timestamp</p>
+              <p className="text-sm text-slate-200 mt-1">{new Date(event.timestamp).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-600 uppercase font-semibold">Confidence</p>
+              <p className={`text-sm font-bold mt-1 ${getConfidenceColor(event.confidence as string)}`}>{(event.confidence as string).toUpperCase()}</p>
+            </div>
           </div>
 
-          <div className="p-6 space-y-6">
-            <div className="grid grid-cols-3 gap-4 pb-4 border-b border-[#3a3a3a]">
-              <div>
-                <p className="text-xs text-slate-600 uppercase font-semibold">Location</p>
-                <p className="text-sm text-slate-200 mt-1">{event.location.lat.toFixed(2)}°, {event.location.lng.toFixed(2)}°</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-600 uppercase font-semibold">Timestamp</p>
-                <p className="text-sm text-slate-200 mt-1">{new Date(event.timestamp).toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-600 uppercase font-semibold">Confidence</p>
-                <p className={`text-sm font-bold mt-1 ${getConfidenceColor(event.confidence as string)}`}>{(event.confidence as string).toUpperCase()}</p>
-              </div>
+          <div>
+            <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3">Summary</h2>
+            <p className="text-sm leading-relaxed text-slate-300">{event.description}</p>
+          </div>
+
+          <div className="bg-[#111111] rounded border border-[#3a3a3a] p-4">
+            <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
+              Analyst Assessment
+            </h2>
+            <div className="space-y-4 text-sm leading-relaxed text-slate-300">
+              {analystNotes.paragraphs.map((para, idx) => <p key={idx}>{para}</p>)}
             </div>
 
-            <div>
-              <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3">Summary</h2>
-              <p className="text-sm leading-relaxed text-slate-300">{event.description}</p>
-            </div>
-
-            <div className="bg-[#111111] rounded border border-[#3a3a3a] p-4">
-              <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3 flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
-                Analyst Assessment
-              </h2>
-              <div className="space-y-4 text-sm leading-relaxed text-slate-300">
-                {analystNotes.paragraphs.map((para, idx) => <p key={idx}>{para}</p>)}
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-[#3a3a3a]">
-                <h3 className="text-xs font-bold uppercase text-slate-400 mb-2">Watch for developments:</h3>
-                <ul className="space-y-2">
-                  {analystNotes.watchPoints.map((point, idx) => (
-                    <li key={idx} className="text-xs text-slate-400 flex gap-2">
-                      <span className="text-[#d4b36a]">▸</span>
-                      <span>{point}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-
-            <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-              <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Event AI Q&A</h2>
-
-              <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
-                {chatMessages.map((msg, idx) => (
-                  <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-                    <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">
-                      {msg.role === "assistant" ? "AI" : "You"}
-                    </span>
-                    <span>{msg.content}</span>
-                  </div>
+            <div className="mt-4 pt-4 border-t border-[#3a3a3a]">
+              <h3 className="text-xs font-bold uppercase text-slate-400 mb-2">Watch for developments:</h3>
+              <ul className="space-y-2">
+                {analystNotes.watchPoints.map((point, idx) => (
+                  <li key={idx} className="text-xs text-slate-400 flex gap-2">
+                    <span className="text-[#d4b36a]">▸</span>
+                    <span>{point}</span>
+                  </li>
                 ))}
-                {chatLoading && (
-                  <div className="text-xs text-slate-500">
-                    <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">AI</span>
-                    Thinking...
-                  </div>
-                )}
-              </div>
+              </ul>
+            </div>
+          </div>
 
-              {chatError && <p className="mt-2 text-[11px] text-red-400">{chatError}</p>}
+          <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
+            <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Event AI Q&A</h2>
 
-              <form
-                className="mt-3 flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  sendChatMessage();
-                }}
-              >
-                <input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask about this event..."
-                  className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={chatLoading || !chatInput.trim()}
-                  className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
-                    chatLoading || !chatInput.trim()
-                      ? "cursor-not-allowed border-slate-700 text-slate-600"
-                      : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
-                  }`}
-                >
-                  {chatLoading ? "Thinking..." : "Ask"}
-                </button>
-              </form>
+            <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
+              {chatMessages.map((msg, idx) => (
+                <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
+                  <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">
+                    {msg.role === "assistant" ? "AI" : "You"}
+                  </span>
+                  <span>{msg.content}</span>
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="text-xs text-slate-500">
+                  <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">AI</span>
+                  Thinking...
+                </div>
+              )}
             </div>
 
-            <div>
-              <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
-              <div className="space-y-2">
-                <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
-                  <span className="text-xs font-mono">{event.source}</span>
-                  <span className="flex-1 truncate text-slate-400">{event.title}</span>
+            {chatError && <p className="mt-2 text-[11px] text-red-400">{chatError}</p>}
+
+            <form
+              className="mt-3 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendChatMessage();
+              }}
+            >
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ask about this event..."
+                className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={chatLoading || !chatInput.trim()}
+                className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
+                  chatLoading || !chatInput.trim()
+                    ? "cursor-not-allowed border-slate-700 text-slate-600"
+                    : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
+                }`}
+              >
+                {chatLoading ? "Thinking..." : "Ask"}
+              </button>
+            </form>
+          </div>
+
+          <div>
+            <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
+            <div className="space-y-2">
+              <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
+                <span className="text-xs font-mono">{event.source}</span>
+                <span className="flex-1 truncate text-slate-400">{event.title}</span>
+                <span className="text-xs">→</span>
+              </a>
+              {analystNotes.additionalSources.map((src, idx) => (
+                <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-slate-400 hover:text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
+                  <span className="text-xs">{src.name}</span>
+                  <span className="flex-1 truncate text-slate-500">{src.title}</span>
                   <span className="text-xs">→</span>
                 </a>
-                {analystNotes.additionalSources.map((src, idx) => (
-                  <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-slate-400 hover:text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
-                    <span className="text-xs">{src.name}</span>
-                    <span className="flex-1 truncate text-slate-500">{src.title}</span>
-                    <span className="text-xs">→</span>
-                  </a>
-                ))}
-              </div>
+              ))}
             </div>
+          </div>
 
-            <div className="pt-4 border-t border-[#3a3a3a]">
-              <p className="text-[10px] text-slate-600 italic">* Analyst assessment generated from available data sources. Confidence levels reflect data quality. Verify with primary sources before action.</p>
-            </div>
+          <div className="pt-4 border-t border-[#3a3a3a]">
+            <p className="text-[10px] text-slate-600 italic">* Analyst assessment generated from available data sources. Confidence levels reflect data quality. Verify with primary sources before action.</p>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

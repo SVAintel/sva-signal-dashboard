@@ -20,19 +20,19 @@ export async function GET(request: Request) {
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const res = await fetch(
-      `https://www.alphavantage.co/query?function=INTRADAY&symbol=${symbol}&interval=5min&apikey=${ALPHA_VANTAGE_KEY}`,
+      `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${ALPHA_VANTAGE_KEY}`,
       { signal: controller.signal, next: { revalidate: 21600 } }
     );
     clearTimeout(timeout);
 
     const data = await res.json();
-    const timeSeries = data["Time Series (5min)"] || {};
+    const timeSeries = data["Time Series (Daily)"] || {};
 
     const chartData = Object.entries(timeSeries)
-      .slice(0, 20)
+      .slice(0, 7)
       .reverse()
-      .map(([time, values]: any) => ({
-        time: new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      .map(([date, values]: any) => ({
+        time: new Date(date).toLocaleDateString([], { month: "short", day: "numeric" }),
         price: parseFloat(values["4. close"]),
         symbol,
       }));
@@ -50,11 +50,11 @@ function generateMockStockData(symbol: string) {
   const data = [];
   let basePrice = 150 + Math.random() * 50;
 
-  for (let i = 20; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 5 * 60000);
-    basePrice += (Math.random() - 0.5) * 2;
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now.getTime() - i * 24 * 60 * 60000);
+    basePrice += (Math.random() - 0.5) * 4;
     data.push({
-      time: time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: date.toLocaleDateString([], { month: "short", day: "numeric" }),
       price: parseFloat(basePrice.toFixed(2)),
       symbol,
     });
