@@ -4,8 +4,13 @@ import cablesData from "@/lib/data/cables.json";
 import pipelinesData from "@/lib/data/pipelines.json";
 import militaryBasesData from "@/lib/data/military-bases.json";
 
-// Underlying datasets already carry long revalidate windows (6h/12h/7d) below —
-// no need to force this route dynamic on top of that.
+// Underlying datasets already carry long revalidate windows (6h/12h/7d) below.
+// This route has no dynamic API usage of its own though, so without
+// force-dynamic Next.js treats it as a STATIC route handler baked in at build
+// time and relies entirely on ISR background revalidation to refresh — which
+// hasn't been reliably triggering in production. force-dynamic makes the
+// handler run per-request while the inner fetches keep their own cache windows.
+export const dynamic = "force-dynamic";
 export const revalidate = 21600;
 
 const SHIPPING_LANES_URL =

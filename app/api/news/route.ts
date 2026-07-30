@@ -1,9 +1,14 @@
 import { THINK_TANK_FEEDS, getRssParser } from "@/lib/event-generator";
 
-// This route now serves the "Global Analysis" panel exclusively from think
-// tank / policy research RSS feeds (RAND, CSIS, Brookings, Atlantic Council,
+// This route now serves the "Insights" panel exclusively from think tank /
+// policy research RSS feeds (RAND, CSIS, Brookings, Atlantic Council,
 // Carnegie Endowment, Crisis Group, Stratfor, AEI) — no general wire news,
 // no NewsAPI. Free, no API key, no rate-limit quota.
+// force-dynamic ensures per-request execution (without it, Next.js treats
+// this as a STATIC route baked in at build time and never reliably
+// refreshed via ISR); the inner RSS fetch still relies on its own in-memory
+// cache window below for actual refresh cadence.
+export const dynamic = "force-dynamic";
 export const revalidate = 1800;
 
 interface NewsItem {
