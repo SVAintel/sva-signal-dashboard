@@ -1,6 +1,7 @@
 "use client";
 
 import Globe, { GlobeMethods } from "react-globe.gl";
+import * as THREE from "three";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
@@ -19,9 +20,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const EARTH_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg";
-const STARFIELD_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png";
+const EARTH_BUMP_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png";
+const CLOUDS_TEXTURE = "https://cdn.jsdelivr.net/gh/vasturiano/react-globe.gl/example/clouds/clouds.png";
+const CLOUDS_ALTITUDE = 0.006;
+const CLOUDS_ROTATION_SPEED = -0.006; // deg/frame, drifts independently of globe autorotation
 const DEFAULT_POV = { lat: 20, lng: 0, altitude: 2.15 };
-const FOCUSED_POV_ALTITUDE = 1.45;
+const FOCUSED_POV_ALTITUDE = 0.5;
 
 interface MapLayers {
   tradeRoutes: boolean;
@@ -33,6 +37,12 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+}
+
+interface GeoJsonFeature {
+  type: "Feature";
+  properties?: { ISO_A2?: string; ADMIN?: string; NAME?: string; [key: string]: unknown };
+  geometry: { type: string; coordinates: unknown };
 }
 
 interface NavalVessel {
@@ -103,14 +113,23 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "event" | "port" | "naval" | "militaryBase" | "wildfire" | "storm";
+  kind: "port" | "naval" | "militaryBase" | "wildfire" | "storm";
   lat: number;
   lng: number;
   color: string;
   radius: number;
   altitude: number;
   label: string;
-  event?: Event;
+}
+
+interface GlobeEventMarker {
+  id: string;
+  lat: number;
+  lng: number;
+  altitude: number;
+  color: string;
+  label: string;
+  event: Event;
 }
 
 interface GlobeArc {
@@ -146,6 +165,9 @@ interface RingDatum {
   lat: number;
   lng: number;
   color: [string, string];
+  maxRadius: number;
+  propagationSpeed: number;
+  repeatPeriod: number;
 }
 
 const TRADE_ROUTES = [
@@ -306,6 +328,29 @@ export default function GlobeMap({
   const priorPointOfViewRef = useRef<{ lat: number; lng: number; altitude: number } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [globeReady, setGlobeReady] = useState(false);
+  const [countryFeatures, setCountryFeatures] = useState<GeoJsonFeature[]>([]);
+
+  // Country outlines aren't baked into the night-earth texture (unlike the
+  // 2D map's tile basemap), so fetch a lightweight world-borders GeoJSON
+  // once and render it as a always-on, non-interactive polygon layer.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("https://cdn.jsdelivr.net/gh/vasturiano/react-globe.gl/example/datasets/ne_110m_admin_0_countries.geojson")
+      .then((res) => res.json())
+      .then((geojson: { features?: GeoJsonFeature[] }) => {
+        if (cancelled) return;
+        const features = (geojson.features || []).filter(
+          (feature) => feature?.properties?.ISO_A2 !== "AQ"
+        );
+        setCountryFeatures(features);
+      })
+      .catch(() => {
+        if (!cancelled) setCountryFeatures([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!mobileVisible) return;
@@ -330,6 +375,47 @@ export default function GlobeMap({
     };
   }, [mobileVisible]);
 
+  // Adds a subtle, semi-transparent cloud sphere slightly above the globe
+  // surface that drifts independently of the globe's own rotation — gives
+  // the render a sense of depth/atmosphere instead of a flat static texture.
+  useEffect(() => {
+    if (!globeReady) return;
+    const globe = globeRef.current;
+    if (!globe) return;
+
+    let cloudMesh: THREE.Mesh | null = null;
+    let frameId: number;
+    let cancelled = false;
+
+    new THREE.TextureLoader().load(CLOUDS_TEXTURE, (cloudsTexture) => {
+      if (cancelled) {
+        cloudsTexture.dispose();
+        return;
+      }
+      const geometry = new THREE.SphereGeometry(globe.getGlobeRadius() * (1 + CLOUDS_ALTITUDE), 75, 75);
+      const material = new THREE.MeshPhongMaterial({ map: cloudsTexture, transparent: true, opacity: 0.4 });
+      cloudMesh = new THREE.Mesh(geometry, material);
+      globe.scene().add(cloudMesh);
+
+      const rotateClouds = () => {
+        if (cloudMesh) cloudMesh.rotation.y += (CLOUDS_ROTATION_SPEED * Math.PI) / 180;
+        frameId = requestAnimationFrame(rotateClouds);
+      };
+      frameId = requestAnimationFrame(rotateClouds);
+    });
+
+    return () => {
+      cancelled = true;
+      if (frameId) cancelAnimationFrame(frameId);
+      if (cloudMesh) {
+        globe.scene().remove(cloudMesh);
+        cloudMesh.geometry.dispose();
+        (cloudMesh.material as THREE.MeshPhongMaterial).map?.dispose();
+        (cloudMesh.material as THREE.MeshPhongMaterial).dispose();
+      }
+    };
+  }, [globeReady]);
+
   useEffect(() => {
     if (!globeReady) return;
     const globe = globeRef.current;
@@ -348,7 +434,10 @@ export default function GlobeMap({
     const globe = globeRef.current;
     if (!globe) return;
 
+    const controls = globe.controls();
+
     if (selectedEvent) {
+      controls.autoRotate = false;
       if (!priorPointOfViewRef.current) {
         priorPointOfViewRef.current = globe.pointOfView();
       }
@@ -358,13 +447,14 @@ export default function GlobeMap({
           lng: selectedEvent.location.lng,
           altitude: FOCUSED_POV_ALTITUDE,
         },
-        1200
+        900
       );
       return;
     }
 
+    controls.autoRotate = true;
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
-    globe.pointOfView(fallback, 1200);
+    globe.pointOfView(fallback, 900);
     priorPointOfViewRef.current = null;
   }, [globeReady, selectedEvent?.id]);
 
@@ -372,19 +462,26 @@ export default function GlobeMap({
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : FALLBACK_CONFLICT_ZONES;
   const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS;
 
-  const pointData = useMemo<GlobePoint[]>(() => {
-    const eventPoints = events.map((event) => ({
-      id: `event-${event.id}`,
-      kind: "event" as const,
-      lat: event.location.lat,
-      lng: event.location.lng,
-      color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.war,
-      radius: 0.28,
-      altitude: 0.12,
-      label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
-      event,
+  // react-globe.gl only supports a single polygon layer, so country outlines
+  // and conflict-zone polygons are merged into one array and styled per-item
+  // via the "kind" discriminant.
+  const combinedPolygons = useMemo(() => {
+    const countries = countryFeatures.map((feature) => ({
+      kind: "country" as const,
+      geometry: feature.geometry,
+      name: feature.properties?.ADMIN || feature.properties?.NAME || "",
     }));
+    const zones = activeLayers.conflictZones
+      ? zonesToRender.map((zone) => ({ ...zone, kind: "zone" as const }))
+      : [];
+    return [...countries, ...zones];
+  }, [countryFeatures, zonesToRender, activeLayers.conflictZones]);
 
+  // All point markers use a near-zero altitude so they render as flat
+  // discs sitting on the globe's surface, not raised 3D pillars/cylinders.
+  const FLAT_ALTITUDE = 0.003;
+
+  const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
 
     if (activeLayers.ports) {
@@ -396,7 +493,7 @@ export default function GlobeMap({
           lng: port.lng,
           color: "#93c5fd",
           radius: 0.14,
-          altitude: 0.025,
+          altitude: FLAT_ALTITUDE,
           label: `Port: ${port.name}${port.country ? ` (${port.country})` : ""}`,
         }))
       );
@@ -411,7 +508,7 @@ export default function GlobeMap({
           lng: vessel.lng,
           color: "#7dd3fc",
           radius: 0.18,
-          altitude: 0.04,
+          altitude: FLAT_ALTITUDE,
           label: `⚓ ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
         }))
       );
@@ -426,7 +523,7 @@ export default function GlobeMap({
           lng: base.lng,
           color: "#6b7d3d",
           radius: 0.14,
-          altitude: 0.03,
+          altitude: FLAT_ALTITUDE,
           label: `🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}`,
         }))
       );
@@ -441,7 +538,7 @@ export default function GlobeMap({
           lng: fire.lng,
           color: fire.frp > 200 ? "#f97316" : "#fca5a5",
           radius: Math.min(0.42, Math.max(0.12, Math.sqrt(Math.max(fire.frp, 1)) / 32)),
-          altitude: 0.05,
+          altitude: FLAT_ALTITUDE,
           label: `🔥 FRP ${fire.frp.toFixed(0)} MW — ${fire.acqDate} ${fire.confidence}% confidence`,
         }))
       );
@@ -456,26 +553,43 @@ export default function GlobeMap({
           lng: storm.lng,
           color: stormColor(storm.classification),
           radius: 0.24,
-          altitude: 0.055,
+          altitude: FLAT_ALTITUDE,
           label: `${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${storm.pressure !== null ? `, ${storm.pressure} mb` : ""}`,
         }))
       );
     }
 
-    return [...layerPoints, ...eventPoints];
+    return [...layerPoints];
   }, [
     activeLayers.militaryBases,
     activeLayers.navalVessels,
     activeLayers.ports,
     activeLayers.storms,
     activeLayers.wildfires,
-    events,
     layerData?.militaryBases,
     navalVessels,
     portsToRender,
     storms,
     wildfires,
   ]);
+
+  // Event markers use HTML overlays (not WebGL points) so they render as
+  // crisp, sharply-defined dots with a white border + glow + pulse ring —
+  // identical to the 2D map's marker style — instead of blending into the
+  // dark earth texture like the flat WebGL discs did.
+  const eventMarkers = useMemo<GlobeEventMarker[]>(
+    () =>
+      events.map((event) => ({
+        id: `event-${event.id}`,
+        lat: event.location.lat,
+        lng: event.location.lng,
+        altitude: FLAT_ALTITUDE,
+        color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.war,
+        label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
+        event,
+      })),
+    [events]
+  );
 
   const tradeArcs = useMemo<GlobeArc[]>(() => {
     if (!activeLayers.tradeRoutes) return [];
@@ -541,15 +655,25 @@ export default function GlobeMap({
     return paths;
   }, [activeLayers.cables, activeLayers.pipelines, layerData?.cables, layerData?.pipelines]);
 
+  // Give every event marker the same continuous small pulse ring the 2D
+  // map's ".marker-pulse-ring" CSS animation shows (fast, tight, ~2s loop),
+  // so events read as "live" on the globe too — not just the selected one.
+  // The small continuous per-event pulse now lives in the HTML marker's own
+  // CSS (`.marker-pulse-ring`, matching the 2D map exactly), so only the
+  // larger, slower focus ring for the selected event remains here (mirrors
+  // the 2D map's bigger EventPingRings focus effect).
   const ringData = useMemo<RingDatum[]>(() => {
     if (!selectedEvent) return [];
     const color = CATEGORY_COLORS[selectedEvent.category] || CATEGORY_COLORS.war;
     return [
       {
-        id: `ring-${selectedEvent.id}`,
+        id: `focus-${selectedEvent.id}`,
         lat: selectedEvent.location.lat,
         lng: selectedEvent.location.lng,
         color: [hexToRgba(color, 0.82), hexToRgba(color, 0.12)],
+        maxRadius: 5.5,
+        propagationSpeed: 4.6,
+        repeatPeriod: 1150,
       },
     ];
   }, [selectedEvent]);
@@ -559,30 +683,56 @@ export default function GlobeMap({
   }
 
   return (
-    <div ref={containerRef} className="h-full w-full bg-[#050505]">
+    <div ref={containerRef} className="relative h-full w-full bg-[#050505]">
+      {/* Thin static grid overlay, matching the 2D map's radar-style grid */}
+      <div
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(to right, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px), repeating-linear-gradient(to bottom, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px)",
+        }}
+      />
       {dimensions.width > 0 && dimensions.height > 0 && (
         <Globe
           ref={globeRef}
           width={dimensions.width}
           height={dimensions.height}
           backgroundColor="rgba(0,0,0,0)"
-          backgroundImageUrl={STARFIELD_TEXTURE}
           globeImageUrl={EARTH_TEXTURE}
+          bumpImageUrl={EARTH_BUMP_TEXTURE}
           showAtmosphere={true}
-          atmosphereColor="#d4b36a"
-          atmosphereAltitude={0.12}
+          atmosphereColor="#f0d9a0"
+          atmosphereAltitude={0.1}
           pointsData={pointData}
           pointColor="color"
           pointAltitude="altitude"
           pointRadius="radius"
           pointLabel="label"
           pointsTransitionDuration={300}
-          onPointClick={(point) => {
-            const marker = point as GlobePoint;
-            if (marker.kind === "event" && marker.event) {
+          htmlElementsData={eventMarkers}
+          htmlLat="lat"
+          htmlLng="lng"
+          htmlAltitude="altitude"
+          htmlElement={(d) => {
+            const marker = d as GlobeEventMarker;
+            const el = document.createElement("div");
+            el.style.position = "relative";
+            el.style.width = "14px";
+            el.style.height = "14px";
+            el.style.cursor = "pointer";
+            el.style.pointerEvents = "auto";
+            el.title = marker.label;
+            el.innerHTML = `
+              <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${marker.color};"></div>
+              <div style="position:relative;width:14px;height:14px;border-radius:50%;background:${marker.color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${marker.color};"></div>
+            `;
+            el.addEventListener("click", (evt) => {
+              evt.stopPropagation();
               onSelectEvent(marker.event);
-            }
+            });
+            return el;
           }}
+          htmlTransitionDuration={300}
           arcsData={tradeArcs}
           arcStartLat="startLat"
           arcStartLng="startLng"
@@ -597,18 +747,34 @@ export default function GlobeMap({
           arcDashInitialGap="dashInitialGap"
           arcDashAnimateTime="dashAnimateTime"
           arcsTransitionDuration={0}
-          polygonsData={activeLayers.conflictZones ? zonesToRender : []}
+          polygonsData={combinedPolygons}
           polygonGeoJsonGeometry="geometry"
-          polygonCapColor={(zone) => hexToRgba(intensityColor((zone as ConflictZoneData).intensity), 0.22)}
-          polygonSideColor={(zone) => hexToRgba(intensityColor((zone as ConflictZoneData).intensity), 0.08)}
-          polygonStrokeColor={(zone) => intensityColor((zone as ConflictZoneData).intensity)}
-          polygonAltitude={(zone) => {
-            const intensity = (zone as ConflictZoneData).intensity;
-            return intensity === "high" ? 0.02 : intensity === "medium" ? 0.014 : 0.01;
+          polygonCapColor={(polygon) => {
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
+            return p.kind === "country" ? "rgba(0,0,0,0)" : hexToRgba(intensityColor(p.intensity!), 0.22);
           }}
-          polygonLabel={(zone) => `${(zone as ConflictZoneData).name} (click to expand)`}
+          polygonSideColor={(polygon) => {
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
+            return p.kind === "country" ? "rgba(0,0,0,0)" : hexToRgba(intensityColor(p.intensity!), 0.08);
+          }}
+          polygonStrokeColor={(polygon) => {
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
+            return p.kind === "country" ? "rgba(148, 163, 184, 0.45)" : intensityColor(p.intensity!);
+          }}
+          polygonAltitude={(polygon) => {
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
+            if (p.kind === "country") return 0.001;
+            return p.intensity === "high" ? 0.02 : p.intensity === "medium" ? 0.014 : 0.01;
+          }}
+          polygonLabel={(polygon) => {
+            const p = polygon as { kind: "country" | "zone"; name?: string };
+            return p.kind === "country" ? p.name || "" : `${p.name} (click to expand)`;
+          }}
           polygonsTransitionDuration={250}
-          onPolygonClick={(zone) => onSelectConflictZone?.(zone as ConflictZoneData)}
+          onPolygonClick={(polygon) => {
+            const p = polygon as { kind: "country" | "zone" };
+            if (p.kind === "zone") onSelectConflictZone?.(polygon as ConflictZoneData);
+          }}
           pathsData={pathData}
           pathPoints="points"
           pathPointAlt="altitude"
@@ -623,13 +789,13 @@ export default function GlobeMap({
           ringsData={ringData}
           ringColor="color"
           ringAltitude={0.01}
-          ringMaxRadius={5.5}
-          ringPropagationSpeed={4.6}
-          ringRepeatPeriod={1150}
+          ringMaxRadius="maxRadius"
+          ringPropagationSpeed="propagationSpeed"
+          ringRepeatPeriod="repeatPeriod"
           enablePointerInteraction={true}
           showPointerCursor={(objType, objData) => {
             const data = objData as { kind?: string } | undefined;
-            return (objType === "point" && data?.kind === "event") || objType === "polygon";
+            return objType === "polygon" && data?.kind === "zone";
           }}
           lineHoverPrecision={0.4}
           onGlobeReady={() => {
