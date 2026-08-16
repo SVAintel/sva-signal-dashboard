@@ -15,6 +15,7 @@ import { Event } from "@/lib/types";
 import axios from "axios";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
+const GlobeMap = dynamic(() => import("./GlobeMap"), { ssr: false });
 
 const categoryLabels: Record<string, { label: string; color: string; tooltip: string }> = {
   war: { label: "WAR", color: "#ef4444", tooltip: "WAR — Armed Conflict & Military Operations" },
@@ -129,6 +130,7 @@ export default function Dashboard() {
     wildfires: false,
     storms: false,
   });
+  const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
 
   // Resizable panel state — sidebar width (drag divider between sidebar/map).
   // The live-feed panel no longer has its own drag handle: since the video
@@ -287,6 +289,17 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [activeLayers.storms]);
 
+  useEffect(() => {
+    const stored = window.localStorage.getItem("dashboard-map-view-mode");
+    if (stored === "2d" || stored === "3d") {
+      setMapViewMode(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("dashboard-map-view-mode", mapViewMode);
+  }, [mapViewMode]);
+
   // Client-side filter by active categories, then by recency (time-range
   // selector). `activeTimeRangeHours === null` means no time filter (show
   // events of any age).
@@ -313,6 +326,20 @@ export default function Dashboard() {
   const toggleLayer = (layer: MapLayerKey) => {
     setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
   };
+
+  const mapProps = {
+    events,
+    selectedEvent,
+    onSelectEvent: handleEventSelect,
+    activeLayers,
+    layerData,
+    navalVessels: activeLayers.navalVessels ? navalVessels : [],
+    wildfires: activeLayers.wildfires ? wildfires : [],
+    storms: activeLayers.storms ? storms : [],
+    onSelectConflictZone: setSelectedConflictZone,
+    mobileVisible: mobileView === "map",
+  };
+
   return (
     <div className="flex h-screen flex-col bg-[#0a0a0a] text-slate-200">
       {/* Top Bar */}
@@ -501,89 +528,100 @@ export default function Dashboard() {
             <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
           </div>
 
-          {/* Map Layers dropdown — positioned under the signals-active badge */}
-          <div className="absolute right-2 top-10 z-[999] sm:right-4 sm:top-12">
-            <button
-              onClick={() => setLayersMenuOpen((v) => !v)}
-              className="flex items-center gap-1.5 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] uppercase tracking-wider text-slate-400 backdrop-blur transition hover:text-[#d4b36a] sm:px-3 sm:text-[10px]"
-            >
-              Map Layers
-              <span className={`transition-transform ${layersMenuOpen ? "rotate-180" : ""}`}>▾</span>
-            </button>
-
-            {layersMenuOpen && (
-              <div className="mt-1 flex flex-col gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-2 text-[9px] backdrop-blur sm:px-3 sm:text-[10px]">
-                {(
-                  [
-                    ["tradeRoutes", "Trade Routes"],
-                    ["conflictZones", "Conflict Zones"],
-                    ["ports", "Ports"],
-                    ["navalVessels", "Naval Vessels"],
-                    ["cables", "Submarine Cables"],
-                    ["pipelines", "Oil & Gas Pipelines"],
-                    ["militaryBases", "Military Bases"],
-                    ["wildfires", "Wildfires"],
-                    ["storms", "Storms"],
-                  ] as [MapLayerKey, string][]
-                ).map(([key, label]) => (
+          {/* Map controls — view toggle plus layer menu */}
+          <div className="absolute right-2 top-10 z-[999] flex flex-col items-end gap-2 sm:right-4 sm:top-12">
+            <div className="flex items-center gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] p-1 backdrop-blur">
+              {(["2d", "3d"] as const).map((mode) => {
+                const isOn = mapViewMode === mode;
+                return (
                   <button
-                    key={key}
-                    onClick={() => toggleLayer(key)}
-                    className={`flex items-center justify-between gap-3 rounded border px-2 py-1 uppercase tracking-wider transition ${
-                      activeLayers[key]
-                        ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                        : "border-slate-700 text-slate-500 hover:text-slate-300"
+                    key={mode}
+                    onClick={() => setMapViewMode(mode)}
+                    className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] transition sm:px-3 sm:text-[10px] ${
+                      isOn
+                        ? "border border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                        : "border border-transparent text-slate-500 hover:text-slate-300"
                     }`}
+                    title={mode === "2d" ? "Show the tactical 2D map" : "Show the rotating 3D globe"}
                   >
-                    <span>{label}</span>
-                    <span>
-                      {key === "navalVessels" && activeLayers.navalVessels
-                        ? navalLoading
-                          ? "SCANNING…"
-                          : `ON (${navalVessels.length})`
-                        : key === "wildfires" && activeLayers.wildfires
-                        ? wildfiresLoading && wildfires.length === 0
-                          ? "LOADING…"
-                          : `ON (${wildfires.length})`
-                        : key === "storms" && activeLayers.storms
-                        ? stormsLoading && storms.length === 0
-                          ? "LOADING…"
-                          : `ON (${storms.length})`
-                        : activeLayers[key]
-                        ? "ON"
-                        : "OFF"}
-                    </span>
+                    {mode}
                   </button>
-                ))}
-                {activeLayers.navalVessels && (
-                  <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                    AIS scan takes ~90s per refresh (every 30 min). Military-flagged
-                    vessels are rare — 0 results on a given scan is expected.
-                    {navalLastChecked && ` Last checked: ${navalLastChecked}.`}
-                  </p>
-                )}
-                {activeLayers.storms && (
-                  <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                    Covers Atlantic + Eastern/Central Pacific only (NOAA NHC) — not
-                    global.
-                  </p>
-                )}
-              </div>
-            )}
+                );
+              })}
+            </div>
+
+            <div>
+              <button
+                onClick={() => setLayersMenuOpen((v) => !v)}
+                className="flex items-center gap-1.5 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] uppercase tracking-wider text-slate-400 backdrop-blur transition hover:text-[#d4b36a] sm:px-3 sm:text-[10px]"
+              >
+                Map Layers
+                <span className={`transition-transform ${layersMenuOpen ? "rotate-180" : ""}`}>▾</span>
+              </button>
+
+              {layersMenuOpen && (
+                <div className="mt-1 flex flex-col gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-2 text-[9px] backdrop-blur sm:px-3 sm:text-[10px]">
+                  {(
+                    [
+                      ["tradeRoutes", "Trade Routes"],
+                      ["conflictZones", "Conflict Zones"],
+                      ["ports", "Ports"],
+                      ["navalVessels", "Naval Vessels"],
+                      ["cables", "Submarine Cables"],
+                      ["pipelines", "Oil & Gas Pipelines"],
+                      ["militaryBases", "Military Bases"],
+                      ["wildfires", "Wildfires"],
+                      ["storms", "Storms"],
+                    ] as [MapLayerKey, string][]
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleLayer(key)}
+                      className={`flex items-center justify-between gap-3 rounded border px-2 py-1 uppercase tracking-wider transition ${
+                        activeLayers[key]
+                          ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                          : "border-slate-700 text-slate-500 hover:text-slate-300"
+                      }`}
+                    >
+                      <span>{label}</span>
+                      <span>
+                        {key === "navalVessels" && activeLayers.navalVessels
+                          ? navalLoading
+                            ? "SCANNING…"
+                            : `ON (${navalVessels.length})`
+                          : key === "wildfires" && activeLayers.wildfires
+                          ? wildfiresLoading && wildfires.length === 0
+                            ? "LOADING…"
+                            : `ON (${wildfires.length})`
+                          : key === "storms" && activeLayers.storms
+                          ? stormsLoading && storms.length === 0
+                            ? "LOADING…"
+                            : `ON (${storms.length})`
+                          : activeLayers[key]
+                          ? "ON"
+                          : "OFF"}
+                      </span>
+                    </button>
+                  ))}
+                  {activeLayers.navalVessels && (
+                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
+                      AIS scan takes ~90s per refresh (every 30 min). Military-flagged
+                      vessels are rare — 0 results on a given scan is expected.
+                      {navalLastChecked && ` Last checked: ${navalLastChecked}.`}
+                    </p>
+                  )}
+                  {activeLayers.storms && (
+                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
+                      Covers Atlantic + Eastern/Central Pacific only (NOAA NHC) — not
+                      global.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          <WorldMap
-            events={events}
-            selectedEvent={selectedEvent}
-            onSelectEvent={handleEventSelect}
-            activeLayers={activeLayers}
-            layerData={layerData}
-            navalVessels={activeLayers.navalVessels ? navalVessels : []}
-            wildfires={activeLayers.wildfires ? wildfires : []}
-            storms={activeLayers.storms ? storms : []}
-            onSelectConflictZone={setSelectedConflictZone}
-            mobileVisible={mobileView === "map"}
-          />
+          {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
 
           {/* Event Detail Panel — docked to the right edge of the map, scrollable */}
           <EventDetailPanel
