@@ -49,6 +49,52 @@ interface GeoJsonFeature {
   geometry: { type: string; coordinates: unknown };
 }
 
+// Computes a rough center point + a POV altitude that roughly frames a
+// country's extent, from its raw GeoJSON geometry (Polygon/MultiPolygon).
+// Mirrors the 2D map's "zoom to fit the selected country" behavior, adapted
+// to the globe's altitude-based camera instead of Leaflet's fitBounds.
+function getCountryFocus(geometry: { type: string; coordinates: unknown }): { lat: number; lng: number; altitude: number } | null {
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+
+  const walk = (coords: unknown, depth: number) => {
+    if (depth === 0) {
+      const point = coords as [number, number];
+      const [lng, lat] = point;
+      if (typeof lng === "number" && typeof lat === "number") {
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+      }
+      return;
+    }
+    (coords as unknown[]).forEach((c) => walk(c, depth - 1));
+  };
+
+  // Polygon coordinates nest 2 levels deep to a [lng, lat] pair;
+  // MultiPolygon nests 3 levels deep.
+  const depth = geometry.type === "MultiPolygon" ? 3 : 2;
+  walk(geometry.coordinates, depth);
+
+  if (!isFinite(minLat) || !isFinite(minLng)) return null;
+
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  const span = Math.max(latSpan, lngSpan);
+  // Small countries zoom in tight; large countries (Russia, Canada, etc.)
+  // pull back further so the whole country is roughly framed.
+  const altitude = Math.min(2.0, Math.max(0.3, span / 55));
+
+  return {
+    lat: (minLat + maxLat) / 2,
+    lng: (minLng + maxLng) / 2,
+    altitude,
+  };
+}
+
 interface NavalVessel {
   mmsi: string;
   name: string;
@@ -380,6 +426,8 @@ export default function GlobeMap({
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
+  onSelectCountry,
+  selectedCountryName = null,
   mobileVisible = true,
 }: {
   events: Event[];
@@ -393,11 +441,18 @@ export default function GlobeMap({
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
   selectedMilitaryBase?: MilitaryBaseFeature | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
+  onSelectCountry?: (name: string) => void;
+  selectedCountryName?: string | null;
   mobileVisible?: boolean;
 }) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const priorPointOfViewRef = useRef<{ lat: number; lng: number; altitude: number } | null>(null);
+  // Tracks whether an event/base/country is currently focused, so the
+  // interaction-pause resume logic below never re-enables autoRotate while
+  // the user has something selected (that already forces autoRotate off).
+  const hasFocusRef = useRef(false);
+  const resumeRotateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [globeReady, setGlobeReady] = useState(false);
   const [countryFeatures, setCountryFeatures] = useState<GeoJsonFeature[]>([]);
@@ -602,6 +657,47 @@ export default function GlobeMap({
     controls.dampingFactor = 0.08;
   }, [globeReady, dimensions.width, dimensions.height]);
 
+  // Pause auto-rotation whenever the user manipulates the globe (drag or
+  // scroll-zoom), then resume it 3 seconds after they let go — this makes it
+  // much easier to click on event/base icons instead of the globe drifting
+  // out from under the cursor mid-interaction.
+  useEffect(() => {
+    if (!globeReady) return;
+    const globe = globeRef.current;
+    if (!globe) return;
+    const controls = globe.controls();
+
+    const clearResumeTimer = () => {
+      if (resumeRotateTimeoutRef.current) {
+        clearTimeout(resumeRotateTimeoutRef.current);
+        resumeRotateTimeoutRef.current = null;
+      }
+    };
+
+    const handleStart = () => {
+      clearResumeTimer();
+      controls.autoRotate = false;
+    };
+
+    const handleEnd = () => {
+      clearResumeTimer();
+      resumeRotateTimeoutRef.current = setTimeout(() => {
+        resumeRotateTimeoutRef.current = null;
+        if (!hasFocusRef.current) {
+          controls.autoRotate = true;
+        }
+      }, 3000);
+    };
+
+    controls.addEventListener("start", handleStart);
+    controls.addEventListener("end", handleEnd);
+    return () => {
+      controls.removeEventListener("start", handleStart);
+      controls.removeEventListener("end", handleEnd);
+      clearResumeTimer();
+    };
+  }, [globeReady]);
+
   useEffect(() => {
     if (!globeReady) return;
     const globe = globeRef.current;
@@ -610,12 +706,24 @@ export default function GlobeMap({
     const controls = globe.controls();
 
     const focusTarget = selectedEvent
-      ? { lat: selectedEvent.location.lat, lng: selectedEvent.location.lng }
+      ? { lat: selectedEvent.location.lat, lng: selectedEvent.location.lng, altitude: FOCUSED_POV_ALTITUDE }
       : selectedMilitaryBase
-      ? { lat: selectedMilitaryBase.lat, lng: selectedMilitaryBase.lng }
+      ? { lat: selectedMilitaryBase.lat, lng: selectedMilitaryBase.lng, altitude: FOCUSED_POV_ALTITUDE }
+      : selectedCountryName
+      ? (() => {
+          const feature = countryFeatures.find(
+            (f) => (f.properties?.ADMIN || f.properties?.NAME) === selectedCountryName
+          );
+          return feature ? getCountryFocus(feature.geometry) : null;
+        })()
       : null;
 
     if (focusTarget) {
+      hasFocusRef.current = true;
+      if (resumeRotateTimeoutRef.current) {
+        clearTimeout(resumeRotateTimeoutRef.current);
+        resumeRotateTimeoutRef.current = null;
+      }
       controls.autoRotate = false;
       if (!priorPointOfViewRef.current) {
         priorPointOfViewRef.current = globe.pointOfView();
@@ -624,18 +732,19 @@ export default function GlobeMap({
         {
           lat: focusTarget.lat,
           lng: focusTarget.lng,
-          altitude: FOCUSED_POV_ALTITUDE,
+          altitude: focusTarget.altitude,
         },
         900
       );
       return;
     }
 
+    hasFocusRef.current = false;
     controls.autoRotate = true;
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
     globe.pointOfView(fallback, 900);
     priorPointOfViewRef.current = null;
-  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id]);
+  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedCountryName, countryFeatures]);
 
   // The globe always uses the curated named routes (not the raw shipping-lane
   // dataset) — that dataset is thousands of short, disconnected density
@@ -648,16 +757,20 @@ export default function GlobeMap({
   // and conflict-zone polygons are merged into one array and styled per-item
   // via the "kind" discriminant.
   const combinedPolygons = useMemo(() => {
-    const countries = countryFeatures.map((feature) => ({
-      kind: "country" as const,
-      geometry: feature.geometry,
-      name: feature.properties?.ADMIN || feature.properties?.NAME || "",
-    }));
+    const countries = countryFeatures.map((feature) => {
+      const name = feature.properties?.ADMIN || feature.properties?.NAME || "";
+      return {
+        kind: "country" as const,
+        geometry: feature.geometry,
+        name,
+        isSelected: !!selectedCountryName && name === selectedCountryName,
+      };
+    });
     const zones = activeLayers.conflictZones
       ? zonesToRender.map((zone) => ({ ...zone, kind: "zone" as const }))
       : [];
     return [...countries, ...zones];
-  }, [countryFeatures, zonesToRender, activeLayers.conflictZones]);
+  }, [countryFeatures, zonesToRender, activeLayers.conflictZones, selectedCountryName]);
 
   const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
@@ -932,32 +1045,38 @@ export default function GlobeMap({
           polygonsData={combinedPolygons}
           polygonGeoJsonGeometry="geometry"
           polygonCapColor={(polygon) => {
-            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
-            return p.kind === "country" ? "rgba(0,0,0,0)" : hexToRgba(intensityColor(p.intensity!), 0.22);
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"]; isSelected?: boolean };
+            if (p.kind === "country") return p.isSelected ? "rgba(212, 179, 106, 0.12)" : "rgba(0,0,0,0)";
+            return hexToRgba(intensityColor(p.intensity!), 0.22);
           }}
           polygonSideColor={(polygon) => {
-            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
-            return p.kind === "country" ? "rgba(0,0,0,0)" : hexToRgba(intensityColor(p.intensity!), 0.08);
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"]; isSelected?: boolean };
+            if (p.kind === "country") return p.isSelected ? "rgba(212, 179, 106, 0.12)" : "rgba(0,0,0,0)";
+            return hexToRgba(intensityColor(p.intensity!), 0.08);
           }}
           polygonStrokeColor={(polygon) => {
-            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
-            return p.kind === "country" ? "rgba(148, 163, 184, 0.45)" : intensityColor(p.intensity!);
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"]; isSelected?: boolean };
+            if (p.kind === "country") return p.isSelected ? "#d4b36a" : "rgba(148, 163, 184, 0.45)";
+            return intensityColor(p.intensity!);
           }}
           polygonAltitude={(polygon) => {
-            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
+            const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"]; isSelected?: boolean };
             // Country borders sit above the cloud shell (CLOUDS_ALTITUDE = 0.006)
             // so the cloud layer never visually swallows the outline strokes.
-            if (p.kind === "country") return CLOUDS_ALTITUDE + 0.003;
+            // The selected country is raised a touch higher so its gold
+            // outline never gets z-fighting-occluded by neighboring borders.
+            if (p.kind === "country") return p.isSelected ? CLOUDS_ALTITUDE + 0.006 : CLOUDS_ALTITUDE + 0.003;
             return p.intensity === "high" ? 0.02 : p.intensity === "medium" ? 0.014 : 0.01;
           }}
           polygonLabel={(polygon) => {
             const p = polygon as { kind: "country" | "zone"; name?: string };
-            return p.kind === "country" ? p.name || "" : `${p.name} (click to expand)`;
+            return p.kind === "country" ? `${p.name || ""} (click to expand)` : `${p.name} (click to expand)`;
           }}
           polygonsTransitionDuration={250}
           onPolygonClick={(polygon) => {
-            const p = polygon as { kind: "country" | "zone" };
+            const p = polygon as { kind: "country" | "zone"; name?: string };
             if (p.kind === "zone") onSelectConflictZone?.(polygon as ConflictZoneData);
+            else if (p.kind === "country" && p.name) onSelectCountry?.(p.name);
           }}
           pathsData={pathData}
           pathPoints="points"
@@ -979,7 +1098,7 @@ export default function GlobeMap({
           enablePointerInteraction={true}
           showPointerCursor={(objType, objData) => {
             const data = objData as { kind?: string } | undefined;
-            return objType === "polygon" && data?.kind === "zone";
+            return objType === "polygon" && (data?.kind === "zone" || data?.kind === "country");
           }}
           lineHoverPrecision={0.4}
           onGlobeReady={() => {

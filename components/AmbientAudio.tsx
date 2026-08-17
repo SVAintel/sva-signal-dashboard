@@ -9,10 +9,21 @@ import { useEffect, useRef, useState } from "react";
 // or Free Music Archive) and it works immediately, no code changes needed.
 const AUDIO_SRC = "/audio/theme.mp3";
 
-export default function AmbientAudio() {
+// Playing/volume are controlled by the parent (Dashboard) so a second,
+// mobile-only control (in the Map Controls sheet) can drive the exact same
+// underlying <audio> element without mounting a duplicate one — that would
+// otherwise double up playback. This component owns the single <audio> tag
+// and reacts to the controlled props; the header UI (hover-to-reveal volume
+// slider) is unchanged from before.
+interface AmbientAudioProps {
+  playing: boolean;
+  onTogglePlaying: () => void;
+  volume: number;
+  onVolumeChange: (volume: number) => void;
+}
+
+export default function AmbientAudio({ playing, onTogglePlaying, volume, onVolumeChange }: AmbientAudioProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.4);
   const [volumeOpen, setVolumeOpen] = useState(false);
   const [missing, setMissing] = useState(false);
 
@@ -20,22 +31,15 @@ export default function AmbientAudio() {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  const toggle = async () => {
+  useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) {
+      audio.play().catch(() => setMissing(true));
+    } else {
       audio.pause();
-      setPlaying(false);
-      return;
     }
-    try {
-      await audio.play();
-      setPlaying(true);
-    } catch {
-      // Blocked by browser autoplay policy, or file missing/unplayable
-      setMissing(true);
-    }
-  };
+  }, [playing]);
 
   return (
     <div
@@ -50,7 +54,7 @@ export default function AmbientAudio() {
         onError={() => setMissing(true)}
       />
       <button
-        onClick={toggle}
+        onClick={onTogglePlaying}
         title={missing ? "No ambient track found (public/audio/theme.mp3)" : playing ? "Mute ambient audio" : "Play ambient audio"}
         className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
           playing
@@ -71,7 +75,7 @@ export default function AmbientAudio() {
               max={1}
               step={0.05}
               value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
               className="w-24 accent-[#d4b36a]"
             />
           </div>

@@ -918,7 +918,7 @@ export default function WorldMap({
             : { color: "#64748b", weight: 1, fillColor: "#64748b", fillOpacity: 0.02, className: "country-border-path" };
           return (
             <GeoJSON
-              key={`${name}-${isSelected}`}
+              key={name}
               data={feature as any}
               style={baseStyle}
               eventHandlers={{

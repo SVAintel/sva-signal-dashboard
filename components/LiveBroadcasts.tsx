@@ -11,6 +11,11 @@ interface Channel {
   hlsUrl?: string | null;
 }
 
+// Minimal shape reported up to Dashboard so the mobile-only PiP mini player
+// can mirror whichever curated channel is currently playing, without lifting
+// all of LiveBroadcasts' internal state (search mode, "More" dropdown, etc.).
+export type ActiveLiveChannel = Pick<Channel, "name" | "videoId" | "directEmbedUrl" | "hlsUrl">;
+
 interface SearchResult {
   videoId: string;
   title: string;
@@ -22,8 +27,10 @@ const QUICK_SEARCHES = ["Israel", "Gaza", "Ukraine", "Iran", "Taiwan", "Sudan"];
 
 // Renders a raw HLS (.m3u8) stream via hls.js (native <video> HLS support is
 // Safari-only, so we need hls.js for Chrome/Firefox/Edge). Reattaches
-// whenever `src` changes (i.e. switching channels).
-function HlsVideo({ src, title }: { src: string; title: string }) {
+// whenever `src` changes (i.e. switching channels). Exported so the
+// mobile-only Picture-in-Picture mini player in Dashboard can reuse the same
+// HLS playback logic without duplicating it.
+export function HlsVideo({ src, title }: { src: string; title: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -76,9 +83,14 @@ interface LiveBroadcastsProps {
   // resize-height prop anymore — the video area is always a fixed 16:9 box.
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  // Optional — reports the currently-playing curated channel (or null when
+  // in search mode / nothing playing yet) up to Dashboard, purely so the
+  // mobile-only Picture-in-Picture mini player can mirror it. Desktop and
+  // the full sidebar player are unaffected by this.
+  onActiveChannelChange?: (channel: ActiveLiveChannel | null) => void;
 }
 
-export default function LiveBroadcasts({ collapsed, onToggleCollapsed }: LiveBroadcastsProps) {
+export default function LiveBroadcasts({ collapsed, onToggleCollapsed, onActiveChannelChange }: LiveBroadcastsProps) {
   const [mode, setMode] = useState<"curated" | "search">("curated");
 
   // Curated mode state
@@ -147,6 +159,25 @@ export default function LiveBroadcasts({ collapsed, onToggleCollapsed }: LiveBro
       });
   }
 
+  const current = channels[active];
+
+  // Report the currently-playing curated channel up to Dashboard (mobile-only
+  // Picture-in-Picture mini player). Only fires in curated mode — search
+  // results are unverified and intentionally excluded from PiP.
+  useEffect(() => {
+    if (!onActiveChannelChange) return;
+    if (mode === "curated" && current) {
+      onActiveChannelChange({
+        name: current.name,
+        videoId: current.videoId,
+        directEmbedUrl: current.directEmbedUrl,
+        hlsUrl: current.hlsUrl,
+      });
+    } else {
+      onActiveChannelChange(null);
+    }
+  }, [mode, current, onActiveChannelChange]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -166,7 +197,6 @@ export default function LiveBroadcasts({ collapsed, onToggleCollapsed }: LiveBro
     );
   }
 
-  const current = channels[active];
   const currentResult = results[searchActive];
 
   return (

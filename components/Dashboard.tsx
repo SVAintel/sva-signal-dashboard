@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
-import LiveBroadcasts from "./LiveBroadcasts";
+import LiveBroadcasts, { HlsVideo, ActiveLiveChannel } from "./LiveBroadcasts";
 import AmbientAudio from "./AmbientAudio";
 import EventDetailPanel from "./EventDetailPanel";
 import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
@@ -113,7 +113,7 @@ export default function Dashboard() {
   const [selectedMilitaryBase, setSelectedMilitaryBase] = useState<MilitaryBaseData | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<CountryData | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
-  const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("all");
+  const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [lastFetchError, setLastFetchError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
@@ -153,6 +153,17 @@ export default function Dashboard() {
   // buttons + "More" dropdown) fits on one line by default without wrapping.
   const [sidebarWidth, setSidebarWidth] = useState(480);
   const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(false);
+  // Mobile-only Picture-in-Picture mini player for the live news feed — see
+  // the "Live PiP mini player" block further down for the render. Mirrors
+  // whichever curated channel is currently playing in the full sidebar
+  // player; entirely additive, no effect on desktop.
+  const [pipChannel, setPipChannel] = useState<ActiveLiveChannel | null>(null);
+  const [pipDismissed, setPipDismissed] = useState(false);
+  // Ambient audio state lifted up from AmbientAudio so both the header
+  // control and the mobile-only Map Controls sheet control drive the same
+  // single <audio> element (no duplicate playback).
+  const [ambientPlaying, setAmbientPlaying] = useState(false);
+  const [ambientVolume, setAmbientVolume] = useState(0.4);
   const dragStateRef = useRef<{ startPos: number; startSize: number } | null>(null);
 
   const handleDragMove = useCallback((e: MouseEvent) => {
@@ -313,6 +324,12 @@ export default function Dashboard() {
     window.localStorage.setItem("dashboard-map-view-mode", mapViewMode);
   }, [mapViewMode]);
 
+  // Re-show the PiP mini player each time the user switches back to the Map
+  // tab on mobile, so a dismissal doesn't stick permanently.
+  useEffect(() => {
+    if (mobileView === "map") setPipDismissed(false);
+  }, [mobileView]);
+
   // Client-side filter by active categories, then by recency (time-range
   // selector). `activeTimeRangeHours === null` means no time filter (show
   // events of any age).
@@ -357,7 +374,16 @@ export default function Dashboard() {
   };
 
   const toggleLayer = (layer: MapLayerKey) => {
-    setActiveLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
+    setActiveLayers((prev) => {
+      const next = !prev[layer];
+      // Default the military-base sub-filter to "Major" every time the layer
+      // is switched on, so users see the higher-signal bases first instead
+      // of the full unfiltered list.
+      if (layer === "militaryBases" && next) {
+        setMilitaryBaseFilter("major");
+      }
+      return { ...prev, [layer]: next };
+    });
   };
 
   const mapProps = {
@@ -471,7 +497,12 @@ export default function Dashboard() {
               UPDATE FAILED — SHOWING STALE DATA
             </span>
           )}
-          <AmbientAudio />
+          <AmbientAudio
+            playing={ambientPlaying}
+            onTogglePlaying={() => setAmbientPlaying((v) => !v)}
+            volume={ambientVolume}
+            onVolumeChange={setAmbientVolume}
+          />
         </div>
       </header>
 
@@ -493,7 +524,7 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 min-h-0 overflow-hidden flex-col md:flex-row">
+      <div className="relative flex flex-1 min-h-0 overflow-hidden flex-col md:flex-row">
         {/* Sidebar with Tabs - on LEFT (desktop) / toggled full-screen panel (mobile) */}
         <div
           style={{ ["--sidebar-w" as any]: `${sidebarWidth}px` }}
@@ -551,6 +582,7 @@ export default function Dashboard() {
               <LiveBroadcasts
                 collapsed={liveFeedCollapsed}
                 onToggleCollapsed={() => setLiveFeedCollapsed((v) => !v)}
+                onActiveChannelChange={setPipChannel}
               />
             </div>
           </div>
@@ -586,8 +618,11 @@ export default function Dashboard() {
             })}
           </div>
 
-          {/* Map legend (desktop; consolidated into the mobile control sheet below on phones) */}
-          <div className="hidden md:block absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
+          {/* Map legend — visible on both desktop and mobile as a floating
+              overlay on the map itself (previously mobile-only had it tucked
+              inside the "Map Controls" bottom sheet, requiring an extra tap
+              to see it; now it's glanceable on the map at all widths). */}
+          <div className="absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
             {Object.entries(categoryLabels).map(([key, val]) => (
               <div key={key} className="flex items-center gap-2 py-0.5">
                 <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
@@ -766,6 +801,38 @@ export default function Dashboard() {
                   })}
                 </div>
 
+                {/* Ambient sound — the header's speaker icon uses a
+                    hover-to-reveal volume slider, which doesn't work on
+                    touch devices, so mobile users had no way to adjust
+                    volume (and the button itself is easy to miss in the
+                    cramped mobile header). This tap-friendly control drives
+                    the exact same shared playing/volume state as the header
+                    icon — same single <audio> element, no duplicate
+                    playback. */}
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Ambient Sound</p>
+                <div className="mb-4 flex items-center gap-3">
+                  <button
+                    onClick={() => setAmbientPlaying((v) => !v)}
+                    className={`flex min-h-[44px] items-center gap-2 rounded border px-3 uppercase tracking-wider transition ${
+                      ambientPlaying
+                        ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                        : "border-slate-700 text-slate-500"
+                    }`}
+                  >
+                    <span>{ambientPlaying ? "\u{1F50A}" : "\u{1F507}"}</span>
+                    <span>{ambientPlaying ? "Playing" : "Muted"}</span>
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={ambientVolume}
+                    onChange={(e) => setAmbientVolume(parseFloat(e.target.value))}
+                    className="h-11 flex-1 accent-[#d4b36a]"
+                  />
+                </div>
+
                 {/* Map layers */}
                 <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Map Layers</p>
                 <div className="mb-4 flex flex-col gap-1.5">
@@ -827,7 +894,8 @@ export default function Dashboard() {
 
           {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
 
-          {/* Event Detail Panel — docked to the right edge of the map, scrollable */}
+          {/* Event Detail Panel — docked to the right edge of the map, scrollable.
+              Desktop-and-mobile-map-tab instance: unchanged from before. */}
           <EventDetailPanel
             event={selectedEvent}
             onClose={handleCloseDetail}
@@ -845,6 +913,79 @@ export default function Dashboard() {
             onClose={() => setSelectedCountry(null)}
           />
         </div>
+
+        {/* Mobile-only: when the user is on the "Signals & Panels" tab (map is
+            hidden), the detail panels above are hidden along with it, so a tap
+            on an event/base/country from the list appeared to do nothing. This
+            duplicate, mobile-only (md:hidden) set renders the same panels as an
+            overlay on top of the Signals panel itself, only while that tab is
+            active. Desktop is completely untouched — this block never renders
+            at md+ widths. */}
+        {mobileView === "panel" && (
+          <div className="md:hidden">
+            <EventDetailPanel
+              event={selectedEvent}
+              onClose={handleCloseDetail}
+            />
+            <MilitaryBaseDetailPanel
+              base={selectedMilitaryBase}
+              onClose={() => setSelectedMilitaryBase(null)}
+            />
+            <CountryDetailPanel
+              country={selectedCountry}
+              onClose={() => setSelectedCountry(null)}
+            />
+          </div>
+        )}
+
+        {/* Mobile-only Picture-in-Picture live feed mini player. The full
+            live-broadcast player lives in the sidebar, which is hidden on
+            mobile while mobileView === "map" (looking at the map). This
+            small floating window mirrors whichever curated channel is
+            currently selected there, so the live feed stays visible while
+            browsing the map. It mounts its own small video/iframe (separate
+            from the sidebar's), so switching to this tab doesn't interrupt
+            the full player. Gated by md:hidden — desktop never renders it. */}
+        {mobileView === "map" && pipChannel && !pipDismissed && (
+          <div className="md:hidden fixed bottom-4 right-2 z-[1000] w-36 overflow-hidden rounded border border-[#3a3a3a] bg-black shadow-lg">
+            <div className="flex items-center justify-between gap-1 bg-[#0e0e0ecc] px-1.5 py-1 backdrop-blur">
+              <div className="flex min-w-0 items-center gap-1">
+                <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+                <span className="truncate text-[8px] font-bold uppercase tracking-widest text-slate-300">
+                  {pipChannel.name}
+                </span>
+              </div>
+              <button
+                onClick={() => setPipDismissed(true)}
+                className="shrink-0 px-1 text-slate-400 hover:text-[#d4b36a]"
+                title="Close mini player"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="w-full bg-black" style={{ aspectRatio: "16/9" }}>
+              {pipChannel.hlsUrl ? (
+                <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
+              ) : pipChannel.directEmbedUrl ? (
+                <iframe
+                  key={pipChannel.directEmbedUrl}
+                  src={pipChannel.directEmbedUrl}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  className="h-full w-full border-0"
+                  title={`${pipChannel.name} Live`}
+                />
+              ) : pipChannel.videoId ? (
+                <iframe
+                  key={pipChannel.videoId}
+                  src={`https://www.youtube.com/embed/${pipChannel.videoId}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  className="h-full w-full border-0"
+                  title={`${pipChannel.name} Live`}
+                />
+              ) : null}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Conflict Zone Detail Modal */}
