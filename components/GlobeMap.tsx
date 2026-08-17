@@ -474,10 +474,21 @@ export default function GlobeMap({
   // behind) a marker's own DOM `click` handler. That means clicking a
   // marker also fires onPolygonClick (for the country underneath) or
   // onGlobeClick (over open ocean) a moment later, which was clobbering or
-  // closing the marker's popup right after it opened. Set this flag the
-  // instant a marker's own click handler runs; onPolygonClick/onGlobeClick
-  // check and clear it to skip acting on that phantom follow-up click.
-  const suppressGlobeClickRef = useRef(false);
+  // closing the marker's popup right after it opened.
+  //
+  // This is a COUNTER, not a boolean: two rapid taps each queue their own
+  // independent, animation-frame-deferred phantom click from globe.gl. With
+  // a plain boolean, the second tap's phantom click can consume the flag
+  // that was meant to guard the first tap's phantom click (whichever fires
+  // first "uses up" the single flag), leaving the other tap's own phantom
+  // click unguarded — which is exactly what caused "the first marker tap
+  // works, the second one opens the country popup instead" on mobile,
+  // where a heavier render load means more than one phantom click can be
+  // in flight at once. Every armed tap increments the counter by one;
+  // every phantom click that gets suppressed decrements it by one — so
+  // each tap's phantom click is paired with its own guard regardless of
+  // firing order.
+  const suppressGlobeClickCountRef = useRef(0);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [globeReady, setGlobeReady] = useState(false);
   const [countryFeatures, setCountryFeatures] = useState<GeoJsonFeature[]>([]);
@@ -960,14 +971,10 @@ export default function GlobeMap({
   // click handler and the proximity-click rescue handler below, so both
   // paths produce identical behavior.
   const openMarkerPopup = useCallback((marker: GlobeMarker) => {
-    suppressGlobeClickRef.current = true;
-    // Failsafe: clear it shortly after in case globe.gl's raycaster somehow
-    // doesn't fire onPolygonClick/onGlobeClick for this click at all (e.g.
-    // the ray misses everything), so the flag never leaks into a later,
-    // unrelated click.
-    setTimeout(() => {
-      suppressGlobeClickRef.current = false;
-    }, 200);
+    // No suppressGlobeClickCountRef bookkeeping here — the pointerdown that
+    // always precedes this click already armed the counter (see the
+    // capture-phase effect below), so incrementing again here would double
+    // count a single tap.
     setPopupTarget((prev) =>
       prev?.id === marker.id
         ? null
@@ -1026,8 +1033,8 @@ export default function GlobeMap({
     };
 
     // globe.gl's own click detection runs off a `pointerup` listener on
-    // this same container (see suppressGlobeClickRef's declaration above),
-    // firing its onPolygonClick/onGlobeClick callback one animation frame
+    // this same container (see suppressGlobeClickCountRef's declaration
+    // above), firing its onPolygonClick/onGlobeClick callback one animation frame
     // later. On desktop, the browser's synchronous `click` event (which is
     // what sets that suppress flag) always fires before that next frame,
     // so timing lines up fine. On mobile, though, some browsers/webviews
@@ -1042,26 +1049,25 @@ export default function GlobeMap({
     const handlePointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest("[data-globe-popup]")) return;
-      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) {
-        suppressGlobeClickRef.current = true;
+      const arm = () => {
+        suppressGlobeClickCountRef.current += 1;
+        // Failsafe: decrement (not reset to 0) shortly after, in case this
+        // turns out not to be a genuine tap (e.g. the user starts dragging
+        // the globe from here instead, or globe.gl's raycaster misses
+        // everything) — decrementing instead of clearing avoids clobbering
+        // another tap's still-pending count.
         setTimeout(() => {
-          suppressGlobeClickRef.current = false;
-        }, 400);
+          suppressGlobeClickCountRef.current = Math.max(0, suppressGlobeClickCountRef.current - 1);
+        }, 500);
+      };
+      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) {
+        arm();
         return;
       }
       const rect = container.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      if (findNearestMarker(x, y)) {
-        suppressGlobeClickRef.current = true;
-        // Failsafe: if this turns out not to be a genuine tap (e.g. the
-        // user starts dragging the globe from here instead), don't leave
-        // the flag stuck on forever and silently swallow a later, unrelated
-        // country click.
-        setTimeout(() => {
-          suppressGlobeClickRef.current = false;
-        }, 400);
-      }
+      if (findNearestMarker(x, y)) arm();
     };
 
     const handleCapture = (e: MouseEvent) => {
@@ -1281,8 +1287,8 @@ export default function GlobeMap({
           }}
           polygonsTransitionDuration={250}
           onPolygonClick={(polygon, _event, coords) => {
-            if (suppressGlobeClickRef.current) {
-              suppressGlobeClickRef.current = false;
+            if (suppressGlobeClickCountRef.current > 0) {
+              suppressGlobeClickCountRef.current -= 1;
               return;
             }
             const p = polygon as { kind: "country" | "zone"; name?: string };
@@ -1306,8 +1312,8 @@ export default function GlobeMap({
             }
           }}
           onGlobeClick={() => {
-            if (suppressGlobeClickRef.current) {
-              suppressGlobeClickRef.current = false;
+            if (suppressGlobeClickCountRef.current > 0) {
+              suppressGlobeClickCountRef.current -= 1;
               return;
             }
             setPopupTarget(null);
