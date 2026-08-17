@@ -117,7 +117,7 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [lastFetchError, setLastFetchError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
-  const [mobileView, setMobileView] = useState<"panel" | "map">("map");
+  const [mobileView, setMobileView] = useState<"panel" | "map" | "live">("map");
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
   // Consolidated bottom-sheet for map controls (time range, view mode, layers,
   // legend) on phone-width screens only — desktop keeps the separate floating
@@ -141,7 +141,7 @@ export default function Dashboard() {
     militaryBases: false,
     wildfires: false,
     storms: false,
-    countries: false,
+    countries: true,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
 
@@ -508,7 +508,7 @@ export default function Dashboard() {
 
       {/* Mobile view switcher — only shown below md breakpoint, split view handles desktop */}
       <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e] md:hidden">
-        {(["map", "panel"] as const).map((view) => (
+        {(["map", "panel", "live"] as const).map((view) => (
           <button
             key={view}
             onClick={() => setMobileView(view)}
@@ -518,7 +518,7 @@ export default function Dashboard() {
                 : "border-transparent text-slate-500"
             }`}
           >
-            {view === "map" ? "MAP" : "SIGNALS & PANELS"}
+            {view === "map" ? "MAP" : view === "panel" ? "SIGNALS & PANELS" : "LIVE FEED"}
           </button>
         ))}
       </div>
@@ -529,56 +529,71 @@ export default function Dashboard() {
         <div
           style={{ ["--sidebar-w" as any]: `${sidebarWidth}px` }}
           className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] flex-1 min-h-0 md:flex md:w-[var(--sidebar-w)] md:flex-none md:shrink-0 ${
-            mobileView === "panel" ? "flex" : "hidden"
+            mobileView === "panel" || mobileView === "live" ? "flex" : "hidden"
           }`}
         >
-          {/* Tab Buttons */}
-          <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e]">
-            {(["events", "news", "stocks", "analyst"] as SidebarTab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 min-h-[44px] md:min-h-0 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
-                  activeTab === tab
-                    ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
-                    : "border-transparent text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                {tab === "events" && "SIGNALS"}
-                {tab === "news" && "INSIGHTS"}
-                {tab === "stocks" && "MARKETS"}
-                {tab === "analyst" && "SVA ANALYST"}
-              </button>
-            ))}
-          </div>
+          {/* Tab Buttons + Tab Content — on mobile, this whole block is
+              swapped out for the dedicated Live Feed panel below while
+              mobileView === "live" (previously the live streams player was
+              squeezed underneath these tabs on mobile, sharing the screen).
+              Desktop is untouched: both this block and the live streams
+              block always render together via md:flex. */}
+          <div className={`min-h-0 flex-col md:flex md:flex-1 ${mobileView === "live" ? "hidden" : "flex flex-1"}`}>
+            <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e]">
+              {(["events", "news", "stocks", "analyst"] as SidebarTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 min-h-[44px] md:min-h-0 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
+                    activeTab === tab
+                      ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
+                      : "border-transparent text-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {tab === "events" && "SIGNALS"}
+                  {tab === "news" && "INSIGHTS"}
+                  {tab === "stocks" && "MARKETS"}
+                  {tab === "analyst" && "SVA ANALYST"}
+                </button>
+              ))}
+            </div>
 
-          {/* Tab Content */}
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-            {activeTab === "events" && (
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                <EventList
-                  events={events}
-                  loading={loading}
-                  onSelectEvent={handleEventSelect}
-                  selectedEvent={selectedEvent}
-                  verification={verification}
-                  onVerificationChange={setVerification}
-                />
-              </div>
-            )}
-            {activeTab === "news" && <NewsPanel />}
-            {activeTab === "stocks" && <StockMarketPanel />}
-            {activeTab === "analyst" && <AIAnalystPanel events={events} />}
+            {/* Tab Content */}
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              {activeTab === "events" && (
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <EventList
+                    events={events}
+                    loading={loading}
+                    onSelectEvent={handleEventSelect}
+                    selectedEvent={selectedEvent}
+                    verification={verification}
+                    onVerificationChange={setVerification}
+                  />
+                </div>
+              )}
+              {activeTab === "news" && <NewsPanel />}
+              {activeTab === "stocks" && <StockMarketPanel />}
+              {activeTab === "analyst" && <AIAnalystPanel events={events} />}
+            </div>
           </div>
 
           {/* Live Streams — its own container, independent of the active tab,
               so it stays visible no matter which tab (Signals/Global
-              Analysis/Markets/AI Analyst) is selected. The collapse toggle
-              lives inside LiveBroadcasts itself, on the Curated/Search row.
-              No drag handle here anymore — the video area is now a fixed
-              16:9 box, so a draggable height no longer had any effect. */}
-          <div className="shrink-0 flex flex-col border-t border-[#3a3a3a]">
-            <div className="shrink-0 overflow-y-auto md:block">
+              Analysis/Markets/AI Analyst) is selected on desktop. On mobile
+              it's now its own dedicated "Live Feed" panel (full screen,
+              via the view switcher above) instead of being squeezed under
+              the tabs — this block is hidden on mobile unless that panel is
+              active, but always visible on desktop (md:flex). The collapse
+              toggle lives inside LiveBroadcasts itself, on the Curated/Search
+              row. No drag handle here anymore — the video area is now a
+              fixed 16:9 box, so a draggable height no longer had any effect. */}
+          <div
+            className={`shrink-0 flex-col border-t border-[#3a3a3a] md:flex ${
+              mobileView === "live" ? "flex flex-1 min-h-0" : "hidden"
+            }`}
+          >
+            <div className="shrink-0 overflow-y-auto md:block md:flex-none flex-1 min-h-0">
               <LiveBroadcasts
                 collapsed={liveFeedCollapsed}
                 onToggleCollapsed={() => setLiveFeedCollapsed((v) => !v)}
@@ -621,8 +636,12 @@ export default function Dashboard() {
           {/* Map legend — visible on both desktop and mobile as a floating
               overlay on the map itself (previously mobile-only had it tucked
               inside the "Map Controls" bottom sheet, requiring an extra tap
-              to see it; now it's glanceable on the map at all widths). */}
-          <div className="absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
+              to see it; now it's glanceable on the map at all widths). On
+              mobile it's sized/positioned to sit side-by-side with the PiP
+              live-feed mini player below (each taking half the width, same
+              fixed height) — reset back to its original auto-sized,
+              bottom-left placement at md+ (desktop). */}
+          <div className="absolute bottom-2 left-2 z-[999] h-28 w-[47vw] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:px-3 sm:py-2 sm:text-[10px] md:h-auto md:w-auto md:max-h-none">
             {Object.entries(categoryLabels).map(([key, val]) => (
               <div key={key} className="flex items-center gap-2 py-0.5">
                 <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
@@ -945,10 +964,13 @@ export default function Dashboard() {
             currently selected there, so the live feed stays visible while
             browsing the map. It mounts its own small video/iframe (separate
             from the sidebar's), so switching to this tab doesn't interrupt
-            the full player. Gated by md:hidden — desktop never renders it. */}
+            the full player. Gated by md:hidden — desktop never renders it.
+            Sized/positioned to match the map legend exactly (same fixed
+            height, half the screen width each) so the two sit side-by-side
+            across the bottom of the screen instead of overlapping. */}
         {mobileView === "map" && pipChannel && !pipDismissed && (
-          <div className="md:hidden fixed bottom-4 right-2 z-[1000] w-36 overflow-hidden rounded border border-[#3a3a3a] bg-black shadow-lg">
-            <div className="flex items-center justify-between gap-1 bg-[#0e0e0ecc] px-1.5 py-1 backdrop-blur">
+          <div className="md:hidden fixed bottom-2 right-2 z-[1000] flex h-28 w-[47vw] flex-col overflow-hidden rounded border border-[#3a3a3a] bg-black shadow-lg sm:bottom-4 sm:right-4">
+            <div className="flex shrink-0 items-center justify-between gap-1 bg-[#0e0e0ecc] px-1.5 py-1 backdrop-blur">
               <div className="flex min-w-0 items-center gap-1">
                 <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
                 <span className="truncate text-[8px] font-bold uppercase tracking-widest text-slate-300">
@@ -963,7 +985,7 @@ export default function Dashboard() {
                 ✕
               </button>
             </div>
-            <div className="w-full bg-black" style={{ aspectRatio: "16/9" }}>
+            <div className="min-h-0 w-full flex-1 bg-black">
               {pipChannel.hlsUrl ? (
                 <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
               ) : pipChannel.directEmbedUrl ? (

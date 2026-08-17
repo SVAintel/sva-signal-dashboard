@@ -2,7 +2,7 @@
 
 import Globe, { GlobeMethods } from "react-globe.gl";
 import * as THREE from "three";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
@@ -41,6 +41,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  countries: boolean;
 }
 
 interface GeoJsonFeature {
@@ -185,6 +186,20 @@ interface GlobeMarker {
   kind: "event" | "militaryBase";
   event?: Event;
   base?: MilitaryBaseFeature;
+}
+
+// Popup state shared by event/military-base markers and country clicks —
+// a superset of what each needs to render its "tactical-popup"-style card
+// and Expand button, and to keep that card glued to the right screen point.
+interface GlobePopupTarget {
+  id: string;
+  kind: "event" | "militaryBase" | "country";
+  lat: number;
+  lng: number;
+  altitude: number;
+  event?: Event;
+  base?: MilitaryBaseFeature;
+  countryName?: string;
 }
 
 interface GlobePath {
@@ -453,9 +468,27 @@ export default function GlobeMap({
   // the user has something selected (that already forces autoRotate off).
   const hasFocusRef = useRef(false);
   const resumeRotateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // globe.gl fires its own polygon/globe click detection from a `pointerup`
+  // listener on the container, raycasting against whatever 3D object sits
+  // under the cursor — completely independent of (and one animation frame
+  // behind) a marker's own DOM `click` handler. That means clicking a
+  // marker also fires onPolygonClick (for the country underneath) or
+  // onGlobeClick (over open ocean) a moment later, which was clobbering or
+  // closing the marker's popup right after it opened. Set this flag the
+  // instant a marker's own click handler runs; onPolygonClick/onGlobeClick
+  // check and clear it to skip acting on that phantom follow-up click.
+  const suppressGlobeClickRef = useRef(false);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [globeReady, setGlobeReady] = useState(false);
   const [countryFeatures, setCountryFeatures] = useState<GeoJsonFeature[]>([]);
+  // Marker click now opens a small popup (title/category + Expand button)
+  // instead of jumping straight to the detail panel — mirrors the 2D map's
+  // Leaflet marker popup flow exactly. popupPos is kept in a ref (not
+  // state) and written directly to the DOM every animation frame so the
+  // popup stays glued to its marker while the globe rotates/zooms without
+  // triggering a React re-render per frame.
+  const [popupTarget, setPopupTarget] = useState<GlobePopupTarget | null>(null);
+  const popupElRef = useRef<HTMLDivElement | null>(null);
   const sweepBarRef = useRef<HTMLDivElement | null>(null);
   const [sweepFlashes, setSweepFlashes] = useState<
     { id: string; lat: number; lng: number; title: string; ts: number }[]
@@ -466,7 +499,8 @@ export default function GlobeMap({
 
   // Country outlines aren't baked into the night-earth texture (unlike the
   // 2D map's tile basemap), so fetch a lightweight world-borders GeoJSON
-  // once and render it as a always-on, non-interactive polygon layer.
+  // once. Whether they're actually drawn is gated by the "Country Borders"
+  // layer toggle further below (combinedPolygons), matching the 2D map.
   useEffect(() => {
     let cancelled = false;
     fetch("https://cdn.jsdelivr.net/gh/vasturiano/react-globe.gl/example/datasets/ne_110m_admin_0_countries.geojson")
@@ -686,7 +720,7 @@ export default function GlobeMap({
         if (!hasFocusRef.current) {
           controls.autoRotate = true;
         }
-      }, 3000);
+      }, 10000);
     };
 
     controls.addEventListener("start", handleStart);
@@ -746,6 +780,34 @@ export default function GlobeMap({
     priorPointOfViewRef.current = null;
   }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedCountryName, countryFeatures]);
 
+  // Close the marker popup once its "Expand" button hands off to the real
+  // detail panel (selectedEvent/selectedMilitaryBase/selectedCountryName
+  // becoming set), so it never lingers on screen behind/alongside the panel.
+  useEffect(() => {
+    if (selectedEvent || selectedMilitaryBase || selectedCountryName) setPopupTarget(null);
+  }, [selectedEvent?.id, selectedMilitaryBase?.id, selectedCountryName]);
+
+  // Keep the popup glued to its marker's projected screen position every
+  // frame while open, so it tracks correctly through globe rotation/zoom —
+  // written directly to the DOM (not React state) to avoid a re-render per
+  // animation frame.
+  useEffect(() => {
+    if (!popupTarget || !globeReady) return;
+    const globe = globeRef.current;
+    if (!globe) return;
+    let rafId: number;
+    const update = () => {
+      const coords = globe.getScreenCoords(popupTarget.lat, popupTarget.lng, popupTarget.altitude);
+      if (popupElRef.current) {
+        popupElRef.current.style.left = `${coords.x}px`;
+        popupElRef.current.style.top = `${coords.y}px`;
+      }
+      rafId = requestAnimationFrame(update);
+    };
+    rafId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(rafId);
+  }, [popupTarget, globeReady]);
+
   // The globe always uses the curated named routes (not the raw shipping-lane
   // dataset) — that dataset is thousands of short, disconnected density
   // fragments which read as "broken" lines when drawn on a sphere.
@@ -757,20 +819,22 @@ export default function GlobeMap({
   // and conflict-zone polygons are merged into one array and styled per-item
   // via the "kind" discriminant.
   const combinedPolygons = useMemo(() => {
-    const countries = countryFeatures.map((feature) => {
-      const name = feature.properties?.ADMIN || feature.properties?.NAME || "";
-      return {
-        kind: "country" as const,
-        geometry: feature.geometry,
-        name,
-        isSelected: !!selectedCountryName && name === selectedCountryName,
-      };
-    });
+    const countries = activeLayers.countries
+      ? countryFeatures.map((feature) => {
+          const name = feature.properties?.ADMIN || feature.properties?.NAME || "";
+          return {
+            kind: "country" as const,
+            geometry: feature.geometry,
+            name,
+            isSelected: !!selectedCountryName && name === selectedCountryName,
+          };
+        })
+      : [];
     const zones = activeLayers.conflictZones
       ? zonesToRender.map((zone) => ({ ...zone, kind: "zone" as const }))
       : [];
     return [...countries, ...zones];
-  }, [countryFeatures, zonesToRender, activeLayers.conflictZones, selectedCountryName]);
+  }, [countryFeatures, zonesToRender, activeLayers.conflictZones, activeLayers.countries, selectedCountryName]);
 
   const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
@@ -884,6 +948,102 @@ export default function GlobeMap({
 
     return markers;
   }, [events, activeLayers.militaryBases, layerData?.militaryBases]);
+
+  // Kept in sync (below, on every render) so the proximity-click handler
+  // effect can read the latest markers without needing to reattach its
+  // event listener every time the marker list changes.
+  const eventMarkersRef = useRef<GlobeMarker[]>([]);
+  eventMarkersRef.current = eventMarkers;
+
+  // Opens (or closes, if already open for this marker) the click-to-expand
+  // popup for an event/military-base marker — shared by the marker's own
+  // click handler and the proximity-click rescue handler below, so both
+  // paths produce identical behavior.
+  const openMarkerPopup = useCallback((marker: GlobeMarker) => {
+    suppressGlobeClickRef.current = true;
+    // Failsafe: clear it shortly after in case globe.gl's raycaster somehow
+    // doesn't fire onPolygonClick/onGlobeClick for this click at all (e.g.
+    // the ray misses everything), so the flag never leaks into a later,
+    // unrelated click.
+    setTimeout(() => {
+      suppressGlobeClickRef.current = false;
+    }, 200);
+    setPopupTarget((prev) =>
+      prev?.id === marker.id
+        ? null
+        : {
+            id: marker.id,
+            kind: marker.kind,
+            lat: marker.lat,
+            lng: marker.lng,
+            altitude: marker.altitude,
+            event: marker.event,
+            base: marker.base,
+          }
+    );
+  }, []);
+
+  // Clicking a marker's own DOM element already works, but densely packed
+  // conflict zones can have a dozen+ markers within a small screen area —
+  // any pixel-perfect gap between their (already enlarged) invisible hit
+  // boxes still falls straight through to the country/globe surface
+  // underneath. This capture-phase listener on the globe's container runs
+  // BEFORE the click ever reaches the canvas (capture always precedes the
+  // target phase, regardless of listener registration order), and rescues
+  // any click that lands within a small radius of a marker's projected
+  // screen position — even if it technically landed on bare globe/country
+  // surface — by treating it as a marker click instead.
+  useEffect(() => {
+    if (!globeReady) return;
+    const container = containerRef.current;
+    const globe = globeRef.current;
+    if (!container || !globe) return;
+
+    // The existing invisible hit-area box already reaches ~25px on-axis
+    // (more diagonally), so this needs to clearly exceed that in every
+    // direction to actually add coverage instead of just duplicating it.
+    const PROXIMITY_PX = 34;
+
+    const handleCapture = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Clicks that already land on a marker (or its hit-area/pulse ring)
+      // are handled by the marker's own click listener — don't double-fire.
+      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) return;
+      // Ignore clicks on the popup card itself (Expand button, etc.).
+      if (target?.closest("[data-globe-popup]")) return;
+
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const camera = globe.camera();
+
+      let nearest: GlobeMarker | null = null;
+      let nearestDist = PROXIMITY_PX;
+      for (const marker of eventMarkersRef.current) {
+        const world = globe.getCoords(marker.lat, marker.lng, marker.altitude);
+        // Skip markers on the far side of the globe (occluded), matching
+        // the same facing-camera test used by the radar sweep effect above.
+        const facingCamera =
+          world.x * camera.position.x + world.y * camera.position.y + world.z * camera.position.z > 0;
+        if (!facingCamera) continue;
+        const screen = globe.getScreenCoords(marker.lat, marker.lng, marker.altitude);
+        const dist = Math.hypot(screen.x - x, screen.y - y);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = marker;
+        }
+      }
+
+      if (nearest) {
+        e.preventDefault();
+        e.stopPropagation();
+        openMarkerPopup(nearest);
+      }
+    };
+
+    container.addEventListener("click", handleCapture, true);
+    return () => container.removeEventListener("click", handleCapture, true);
+  }, [globeReady, openMarkerPopup]);
 
   const pathData = useMemo<GlobePath[]>(() => {
     const paths: GlobePath[] = [];
@@ -1031,13 +1191,13 @@ export default function GlobeMap({
             el.style.pointerEvents = "auto";
             el.title = marker.label;
             el.innerHTML = `
+              <div class="globe-marker-tap-hit-area"></div>
               <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${marker.color};"></div>
               <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${marker.color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${marker.color};"></div>
             `;
             el.addEventListener("click", (evt) => {
               evt.stopPropagation();
-              if (marker.kind === "event" && marker.event) onSelectEvent(marker.event);
-              else if (marker.kind === "militaryBase" && marker.base) onSelectMilitaryBase?.(marker.base);
+              openMarkerPopup(marker);
             });
             return el;
           }}
@@ -1070,13 +1230,40 @@ export default function GlobeMap({
           }}
           polygonLabel={(polygon) => {
             const p = polygon as { kind: "country" | "zone"; name?: string };
-            return p.kind === "country" ? `${p.name || ""} (click to expand)` : `${p.name} (click to expand)`;
+            return p.kind === "country" ? "" : `${p.name} (click to expand)`;
           }}
           polygonsTransitionDuration={250}
-          onPolygonClick={(polygon) => {
+          onPolygonClick={(polygon, _event, coords) => {
+            if (suppressGlobeClickRef.current) {
+              suppressGlobeClickRef.current = false;
+              return;
+            }
             const p = polygon as { kind: "country" | "zone"; name?: string };
-            if (p.kind === "zone") onSelectConflictZone?.(polygon as ConflictZoneData);
-            else if (p.kind === "country" && p.name) onSelectCountry?.(p.name);
+            if (p.kind === "zone") {
+              setPopupTarget(null);
+              onSelectConflictZone?.(polygon as ConflictZoneData);
+            } else if (p.kind === "country" && p.name) {
+              const name = p.name;
+              setPopupTarget((prev) =>
+                prev?.kind === "country" && prev.countryName === name
+                  ? null
+                  : {
+                      id: `country-${name}`,
+                      kind: "country",
+                      lat: coords.lat,
+                      lng: coords.lng,
+                      altitude: coords.altitude,
+                      countryName: name,
+                    }
+              );
+            }
+          }}
+          onGlobeClick={() => {
+            if (suppressGlobeClickRef.current) {
+              suppressGlobeClickRef.current = false;
+              return;
+            }
+            setPopupTarget(null);
           }}
           pathsData={pathData}
           pathPoints="points"
@@ -1107,6 +1294,133 @@ export default function GlobeMap({
           }}
         />
       )}
+      {/* Marker popup — click-to-expand flow matching the 2D map's Leaflet
+          "tactical-popup" exactly: a small dark card with the event/base
+          summary and an Expand button that hands off to the real detail
+          panel. Positioned via the globe's screen projection (updated every
+          frame by the effect above) since there's no DOM anchor point like
+          Leaflet gives us. */}
+      {popupTarget &&
+        (() => {
+          const initialCoords = globeRef.current
+            ? globeRef.current.getScreenCoords(popupTarget.lat, popupTarget.lng, popupTarget.altitude)
+            : { x: 0, y: 0 };
+          return (
+            <div
+              ref={popupElRef}
+              data-globe-popup
+              style={{
+                position: "absolute",
+                left: initialCoords.x,
+                top: initialCoords.y,
+                transform: "translate(-50%, calc(-100% - 16px))",
+                zIndex: 1500,
+                pointerEvents: "auto",
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  background: "#111111",
+                  border: "1px solid #d4b36a",
+                  borderRadius: "4px",
+                  boxShadow: "0 3px 14px rgba(0,0,0,0.6)",
+                  padding: "8px 20px 8px 10px",
+                  minWidth: "180px",
+                }}
+              >
+                {/* Close "×" button — matches Leaflet's default popup close
+                    control on the 2D map (top-right corner, dismisses
+                    without needing to hit Expand or click elsewhere). */}
+                <button
+                  onClick={() => setPopupTarget(null)}
+                  aria-label="Close"
+                  style={{
+                    position: "absolute",
+                    top: "2px",
+                    right: "6px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+                {popupTarget.kind === "event" && popupTarget.event ? (
+                  <>
+                    <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      {popupTarget.event.category.replace(/_/g, " ")}
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.event.title}</div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>{popupTarget.event.source}</div>
+                  </>
+                ) : popupTarget.kind === "militaryBase" && popupTarget.base ? (
+                  <>
+                    <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      Military Installation{popupTarget.base.isMajor ? " • Major" : ""}
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.base.name}</div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      {popupTarget.base.country || "Location unconfirmed"}
+                      {popupTarget.base.operator ? ` — ${popupTarget.base.operator}` : ""}
+                    </div>
+                  </>
+                ) : popupTarget.kind === "country" && popupTarget.countryName ? (
+                  <>
+                    <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      Country
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.countryName}</div>
+                  </>
+                ) : null}
+                <button
+                  onClick={() => {
+                    if (popupTarget.kind === "event" && popupTarget.event) onSelectEvent(popupTarget.event);
+                    else if (popupTarget.kind === "militaryBase" && popupTarget.base) onSelectMilitaryBase?.(popupTarget.base);
+                    else if (popupTarget.kind === "country" && popupTarget.countryName) onSelectCountry?.(popupTarget.countryName);
+                    setPopupTarget(null);
+                  }}
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    border: "1px solid #3a3a3a",
+                    background: "#1e1e1e",
+                    color: "#d4b36a",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Expand
+                </button>
+                {/* Tip triangle pointing down at the marker, matching the
+                    2D map's Leaflet popup tip (rotated square, same colors). */}
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "-7px",
+                    left: "50%",
+                    width: "12px",
+                    height: "12px",
+                    background: "#111111",
+                    border: "1px solid #d4b36a",
+                    borderTop: "none",
+                    borderLeft: "none",
+                    transform: "translateX(-50%) rotate(45deg)",
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })()}
       {/* Sweeping line — thin bright core + soft wide glow trailing behind
           it, matching the 2D map's ScanSweep bar exactly. */}
       <div

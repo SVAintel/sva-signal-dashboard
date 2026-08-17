@@ -55,6 +55,43 @@ body {
   animation: marker-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* Invisible enlarged click/tap target laid over small event marker icons.
+   The visible dot stays tiny/unchanged; this transparent, absolutely-
+   positioned box just gives pointer input a much bigger hit area so a
+   click/tap lands on the marker instead of passing through to the
+   country/zone polygon underneath it. Applies on all screen sizes since
+   overlapping polygons make tiny markers hard to hit with a mouse too. */
+.marker-tap-hit-area {
+  position: absolute;
+  inset: -10px;
+  pointer-events: auto;
+}
+
+@media (max-width: 767px) {
+  .marker-tap-hit-area {
+    inset: -14px;
+  }
+}
+
+/* Same idea as .marker-tap-hit-area above, but sized larger for the 3D
+   globe view specifically. Globe markers sit directly over clickable
+   country polygon meshes (raycast hit-tested on the WebGL canvas, not
+   DOM), and unlike the 2D map the globe doesn't get bigger/easier-to-hit
+   markers when zoomed in — their on-screen size stays fixed — so a
+   noticeably bigger invisible tap zone is needed to reliably land on a
+   marker instead of the country underneath it. */
+.globe-marker-tap-hit-area {
+  position: absolute;
+  inset: -18px;
+  pointer-events: auto;
+}
+
+@media (max-width: 767px) {
+  .globe-marker-tap-hit-area {
+    inset: -22px;
+  }
+}
+
 /* Radar scan-reveal effect: ring expands + fades when the sweep line crosses an event marker */
 @keyframes scan-reveal-ring {
   0% {

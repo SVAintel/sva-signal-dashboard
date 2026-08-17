@@ -14,6 +14,7 @@ const makeIcon = (color: string) =>
   new L.DivIcon({
     className: "",
     html: `<div style="position:relative;width:14px;height:14px;">
+      <div class="marker-tap-hit-area"></div>
       <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${color};"></div>
       <div style="position:relative;width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${color};"></div>
     </div>`,
@@ -879,6 +880,8 @@ export default function WorldMap({
   // Same purpose as markerRefs above, but for military base markers so their
   // popup can be closed right when "Expand" triggers the fly-to/zoom.
   const baseMarkerRefs = useRef(new Map<string, L.Marker>());
+  // Same purpose again, but for country border GeoJSON layers.
+  const countryLayerRefs = useRef(new Map<string, L.GeoJSON>());
   // Look up the selected country's GeoJSON feature (for MapCountryFocuser to
   // fly/zoom to) — memoized so its identity is stable unless the selection
   // or the loaded feature set actually changes.
@@ -921,6 +924,10 @@ export default function WorldMap({
               key={name}
               data={feature as any}
               style={baseStyle}
+              ref={(layer) => {
+                if (layer) countryLayerRefs.current.set(name, layer);
+                else countryLayerRefs.current.delete(name);
+              }}
               eventHandlers={{
                 mouseover: (e) => {
                   if (!isSelected) e.target.setStyle({ weight: 1.6, color: "#94a3b8" });
@@ -928,12 +935,41 @@ export default function WorldMap({
                 mouseout: (e) => {
                   if (!isSelected) e.target.setStyle(baseStyle);
                 },
-                click: () => {
-                  onSelectCountry?.(name);
-                },
               }}
             >
-              <Tooltip sticky>{`${name} (click to expand)`}</Tooltip>
+              <Popup className="tactical-popup">
+                <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+                  <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                    Country
+                  </div>
+                  <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{name}</div>
+                  <button
+                    onClick={() => {
+                      // Close the popup immediately — the map is about to
+                      // fly/zoom in on this country and the side detail
+                      // panel takes over as the source of truth.
+                      countryLayerRefs.current.get(name)?.closePopup();
+                      onSelectCountry?.(name);
+                    }}
+                    style={{
+                      marginTop: "8px",
+                      width: "100%",
+                      border: "1px solid #3a3a3a",
+                      background: "#1e1e1e",
+                      color: "#d4b36a",
+                      borderRadius: "4px",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      padding: "6px 8px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Expand
+                  </button>
+                </div>
+              </Popup>
             </GeoJSON>
           );
         })}
