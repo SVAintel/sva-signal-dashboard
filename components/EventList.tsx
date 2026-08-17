@@ -1,16 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Event } from "@/lib/types";
-
-type VerificationFilter = "all" | "confirmed" | "unconfirmed";
-
-// Telegram is scraped OSINT/war-monitor chatter, not a vetted news source —
-// treat it as "unconfirmed". Every other source (wire APIs, RSS outlets,
-// ACLED, GDELT, USGS/EMSC, etc.) is treated as "confirmed".
-function isUnconfirmed(source: string): boolean {
-  return source.startsWith("Telegram");
-}
+import { useMemo } from "react";
+import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
 
 const categoryMeta: Record<string, { label: string; color: string; bg: string }> = {
   war:               { label: "WAR",     color: "#ef4444", bg: "#1a0a0a" },
@@ -36,18 +27,20 @@ export default function EventList({
   loading,
   onSelectEvent,
   selectedEvent,
+  verification,
+  onVerificationChange,
 }: {
   events: Event[];
   loading: boolean;
   onSelectEvent: (event: Event | null) => void;
   selectedEvent: Event | null;
+  verification: VerificationFilter;
+  onVerificationChange: (v: VerificationFilter) => void;
 }) {
-  const [verification, setVerification] = useState<VerificationFilter>("all");
-
   const filteredEvents = useMemo(() => {
     if (verification === "all") return events;
     return events.filter((e) =>
-      verification === "unconfirmed" ? isUnconfirmed(e.source) : !isUnconfirmed(e.source)
+      verification === "unconfirmed" ? isUnconfirmedSource(e.source) : !isUnconfirmedSource(e.source)
     );
   }, [events, verification]);
 
@@ -75,7 +68,7 @@ export default function EventList({
             {(["all", "confirmed", "unconfirmed"] as VerificationFilter[]).map((v) => (
               <button
                 key={v}
-                onClick={() => setVerification(v)}
+                onClick={() => onVerificationChange(v)}
                 className={`rounded border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ${
                   verification === v
                     ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"

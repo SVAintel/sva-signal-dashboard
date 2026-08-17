@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
+import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
 
 const CATEGORY_COLORS: Record<string, string> = {
   war: "#ef4444",
@@ -26,6 +27,9 @@ const CLOUDS_ALTITUDE = 0.006;
 const CLOUDS_ROTATION_SPEED = -0.006; // deg/frame, drifts independently of globe autorotation
 const DEFAULT_POV = { lat: 20, lng: 0, altitude: 2.15 };
 const FOCUSED_POV_ALTITUDE = 0.5;
+// All point markers use a near-zero altitude so they render as flat
+// discs sitting on the globe's surface, not raised 3D pillars/cylinders.
+const FLAT_ALTITUDE = 0.003;
 
 interface MapLayers {
   tradeRoutes: boolean;
@@ -100,6 +104,8 @@ interface MilitaryBaseFeature {
   lng: number;
   country: string | null;
   operator: string | null;
+  isMajor: boolean;
+  details?: MilitaryBaseDetail;
 }
 
 interface MapLayerData {
@@ -113,7 +119,7 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "port" | "naval" | "militaryBase" | "wildfire" | "storm";
+  kind: "port" | "naval" | "wildfire" | "storm";
   lat: number;
   lng: number;
   color: string;
@@ -122,34 +128,22 @@ interface GlobePoint {
   label: string;
 }
 
-interface GlobeEventMarker {
+interface GlobeMarker {
   id: string;
   lat: number;
   lng: number;
   altitude: number;
   color: string;
+  size: number;
   label: string;
-  event: Event;
-}
-
-interface GlobeArc {
-  id: string;
-  startLat: number;
-  startLng: number;
-  endLat: number;
-  endLng: number;
-  color: string;
-  label: string;
-  altitude: number;
-  dashLength: number;
-  dashGap: number;
-  dashInitialGap: number;
-  dashAnimateTime: number;
+  kind: "event" | "militaryBase";
+  event?: Event;
+  base?: MilitaryBaseFeature;
 }
 
 interface GlobePath {
   id: string;
-  points: [number, number][];
+  points: [number, number, number][];
   color: string;
   label: string;
   stroke: number;
@@ -158,6 +152,15 @@ interface GlobePath {
   dashInitialGap: number;
   dashAnimateTime: number;
   altitude: number;
+}
+
+// three-globe reads path altitude PER POINT (not per path), via whatever
+// field/function pathPointAlt is set to, applied to each raw point tuple —
+// not to the path object itself. So altitude must be baked into every
+// point as a 3rd array element; a path-level "altitude" property is never
+// read and silently produces NaN positions (an invisible line).
+function withAltitude(points: [number, number][], altitude: number): [number, number, number][] {
+  return points.map(([lat, lng]) => [lat, lng, altitude]);
 }
 
 interface RingDatum {
@@ -170,29 +173,94 @@ interface RingDatum {
   repeatPeriod: number;
 }
 
+// Curated set of well-known, real-world shipping corridors, chosen specifically
+// for the 3D globe: each is a single continuous, hand-picked waypoint chain
+// (unlike the raw shipping-lane dataset, which is thousands of short,
+// disconnected density fragments that read as "broken" lines on a sphere).
 const TRADE_ROUTES = [
   {
-    name: "Suez Corridor",
+    name: "Trans-Pacific Route",
     points: [
-      [31.26, 32.3],
-      [20.0, 38.0],
-      [12.0, 44.0],
+      [31.2, 121.5], // Shanghai
+      [35.5, 140.5], // off Japan
+      [45.0, 175.0], // North Pacific
+      [48.0, -170.0], // crossing antimeridian
+      [45.0, -140.0],
+      [33.7, -118.2], // Los Angeles
     ] as [number, number][],
   },
   {
-    name: "Strait of Malacca Route",
+    name: "Trans-Atlantic Route",
     points: [
-      [22.3, 114.2],
-      [10.0, 103.8],
-      [1.2, 104.0],
+      [51.9, 4.5], // Rotterdam
+      [49.0, -8.0],
+      [45.0, -35.0],
+      [42.0, -60.0],
+      [40.7, -74.0], // New York
     ] as [number, number][],
   },
   {
-    name: "Panama Route",
+    name: "Asia-Europe via Suez",
     points: [
-      [25.8, -80.2],
-      [9.0, -79.5],
-      [-12.0, -77.0],
+      [31.2, 121.5], // Shanghai
+      [10.0, 106.0], // South China Sea
+      [1.3, 103.8], // Singapore Strait
+      [6.0, 80.0], // south of Sri Lanka
+      [12.6, 43.4], // Bab-el-Mandeb
+      [27.8, 34.3], // Red Sea
+      [31.3, 32.3], // Suez Canal
+      [35.5, 22.0], // Mediterranean
+      [36.0, -5.4], // Strait of Gibraltar
+      [51.9, 4.5], // Rotterdam
+    ] as [number, number][],
+  },
+  {
+    name: "Cape of Good Hope Route",
+    points: [
+      [31.2, 121.5], // Shanghai
+      [1.3, 103.8], // Singapore Strait
+      [-6.0, 80.0], // south of Sri Lanka
+      [-34.0, 18.4], // Cape Town
+      [10.0, -12.0], // West Africa coast
+      [51.9, 4.5], // Rotterdam
+    ] as [number, number][],
+  },
+  {
+    name: "Panama Canal Route",
+    points: [
+      [33.7, -118.2], // Los Angeles
+      [17.0, -95.0],
+      [9.0, -79.5], // Panama Canal
+      [25.8, -80.2], // Miami
+      [40.7, -74.0], // New York
+    ] as [number, number][],
+  },
+  {
+    name: "Strait of Hormuz Route",
+    points: [
+      [26.5, 56.25], // Strait of Hormuz
+      [18.0, 65.0],
+      [8.0, 77.5],
+      [1.3, 103.8], // Singapore Strait
+      [22.3, 114.2], // Hong Kong
+    ] as [number, number][],
+  },
+  {
+    name: "Australia-Asia Route",
+    points: [
+      [-33.9, 151.2], // Sydney
+      [-15.0, 128.0],
+      [1.3, 103.8], // Singapore Strait
+      [22.3, 114.2], // Hong Kong
+    ] as [number, number][],
+  },
+  {
+    name: "West Africa-Europe Route",
+    points: [
+      [6.4, 3.4], // Lagos
+      [20.0, -17.0],
+      [36.0, -5.4], // Strait of Gibraltar
+      [51.9, 4.5], // Rotterdam
     ] as [number, number][],
   },
 ];
@@ -310,6 +378,8 @@ export default function GlobeMap({
   wildfires = [],
   storms = [],
   onSelectConflictZone,
+  selectedMilitaryBase = null,
+  onSelectMilitaryBase,
   mobileVisible = true,
 }: {
   events: Event[];
@@ -321,6 +391,8 @@ export default function GlobeMap({
   wildfires?: Wildfire[];
   storms?: Storm[];
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
+  selectedMilitaryBase?: MilitaryBaseFeature | null;
+  onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
   mobileVisible?: boolean;
 }) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
@@ -329,6 +401,13 @@ export default function GlobeMap({
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [globeReady, setGlobeReady] = useState(false);
   const [countryFeatures, setCountryFeatures] = useState<GeoJsonFeature[]>([]);
+  const sweepBarRef = useRef<HTMLDivElement | null>(null);
+  const [sweepFlashes, setSweepFlashes] = useState<
+    { id: string; lat: number; lng: number; title: string; ts: number }[]
+  >([]);
+  const sweepFlashElRefs = useRef(new Map<string, HTMLDivElement | null>());
+  const sweepFlashesRef = useRef(sweepFlashes);
+  sweepFlashesRef.current = sweepFlashes;
 
   // Country outlines aren't baked into the night-earth texture (unlike the
   // 2D map's tile basemap), so fetch a lightweight world-borders GeoJSON
@@ -393,7 +472,15 @@ export default function GlobeMap({
         return;
       }
       const geometry = new THREE.SphereGeometry(globe.getGlobeRadius() * (1 + CLOUDS_ALTITUDE), 75, 75);
-      const material = new THREE.MeshPhongMaterial({ map: cloudsTexture, transparent: true, opacity: 0.4 });
+      // Unlit material (not affected by scene lighting) kept subtle and
+      // non-depth-writing so it never occludes country borders/markers
+      // rendered at a higher altitude on the globe surface.
+      const material = new THREE.MeshBasicMaterial({
+        map: cloudsTexture,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+      });
       cloudMesh = new THREE.Mesh(geometry, material);
       globe.scene().add(cloudMesh);
 
@@ -410,11 +497,97 @@ export default function GlobeMap({
       if (cloudMesh) {
         globe.scene().remove(cloudMesh);
         cloudMesh.geometry.dispose();
-        (cloudMesh.material as THREE.MeshPhongMaterial).map?.dispose();
-        (cloudMesh.material as THREE.MeshPhongMaterial).dispose();
+        (cloudMesh.material as THREE.MeshBasicMaterial).map?.dispose();
+        (cloudMesh.material as THREE.MeshBasicMaterial).dispose();
       }
     };
   }, [globeReady]);
+
+  // Radar-style sweep, matching the 2D map's ScanSweep: a bright vertical
+  // line pulses left-to-right across the view on a loop. When the sweep
+  // front crosses an event marker's current on-screen projection — and that
+  // point currently faces the camera rather than being hidden on the far
+  // side of the globe — the event briefly "reveals" with an expanding ring
+  // + fading title label, tracked every frame via the live globe projection
+  // so it stays accurate as the camera orbits.
+  useEffect(() => {
+    if (!globeReady) return;
+    const globe = globeRef.current;
+    if (!globe) return;
+    if (dimensions.width <= 0 || dimensions.height <= 0) return;
+
+    const durationMs = 9000;
+    let raf: number;
+    let start: number | null = null;
+    let prevX = 0;
+    let prevProgress = 0;
+    const recentlyFlashed = new Map<string, number>();
+
+    const step = (t: number) => {
+      if (start === null) start = t;
+      const elapsed = (t - start) % durationMs;
+      const progress = elapsed / durationMs;
+      const width = dimensions.width;
+      const height = dimensions.height;
+      const currX = progress * width;
+
+      if (sweepBarRef.current) {
+        sweepBarRef.current.style.transform = `translateX(${currX}px)`;
+      }
+
+      const camera = globe.camera();
+
+      if (progress >= prevProgress) {
+        const lo = Math.min(prevX, currX);
+        const hi = Math.max(prevX, currX);
+        const newFlashes: typeof sweepFlashes = [];
+        for (const event of events) {
+          const last = recentlyFlashed.get(event.id);
+          if (last !== undefined && t - last < durationMs * 0.5) continue;
+          const { lat, lng } = event.location;
+          const world = globe.getCoords(lat, lng, FLAT_ALTITUDE);
+          const facingCamera =
+            world.x * camera.position.x + world.y * camera.position.y + world.z * camera.position.z > 0;
+          if (!facingCamera) continue;
+          const screen = globe.getScreenCoords(lat, lng, FLAT_ALTITUDE);
+          if (screen.x >= lo && screen.x <= hi && screen.y >= 0 && screen.y <= height) {
+            recentlyFlashed.set(event.id, t);
+            newFlashes.push({ id: `${event.id}-${t}`, lat, lng, title: event.title, ts: t });
+          }
+        }
+        if (newFlashes.length > 0) {
+          setSweepFlashes((f) => [...f, ...newFlashes]);
+        }
+      }
+
+      for (const [id, el] of sweepFlashElRefs.current) {
+        if (!el) continue;
+        const fl = sweepFlashesRef.current.find((f) => f.id === id);
+        if (!fl) continue;
+        const screen = globe.getScreenCoords(fl.lat, fl.lng, FLAT_ALTITUDE);
+        el.style.transform = `translate(${screen.x}px, ${screen.y}px)`;
+      }
+
+      prevX = currX;
+      prevProgress = progress;
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [globeReady, dimensions.width, dimensions.height, events]);
+
+  // Sweep out old flash entries so the array doesn't grow unbounded.
+  useEffect(() => {
+    if (sweepFlashes.length === 0) return;
+    const id = setTimeout(() => {
+      setSweepFlashes((f) => f.filter((fl) => performance.now() - fl.ts < 2000));
+      for (const key of Array.from(sweepFlashElRefs.current.keys())) {
+        if (!sweepFlashes.some((fl) => fl.id === key)) sweepFlashElRefs.current.delete(key);
+      }
+    }, 500);
+    return () => clearTimeout(id);
+  }, [sweepFlashes]);
 
   useEffect(() => {
     if (!globeReady) return;
@@ -436,15 +609,21 @@ export default function GlobeMap({
 
     const controls = globe.controls();
 
-    if (selectedEvent) {
+    const focusTarget = selectedEvent
+      ? { lat: selectedEvent.location.lat, lng: selectedEvent.location.lng }
+      : selectedMilitaryBase
+      ? { lat: selectedMilitaryBase.lat, lng: selectedMilitaryBase.lng }
+      : null;
+
+    if (focusTarget) {
       controls.autoRotate = false;
       if (!priorPointOfViewRef.current) {
         priorPointOfViewRef.current = globe.pointOfView();
       }
       globe.pointOfView(
         {
-          lat: selectedEvent.location.lat,
-          lng: selectedEvent.location.lng,
+          lat: focusTarget.lat,
+          lng: focusTarget.lng,
           altitude: FOCUSED_POV_ALTITUDE,
         },
         900
@@ -456,9 +635,12 @@ export default function GlobeMap({
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
     globe.pointOfView(fallback, 900);
     priorPointOfViewRef.current = null;
-  }, [globeReady, selectedEvent?.id]);
+  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id]);
 
-  const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
+  // The globe always uses the curated named routes (not the raw shipping-lane
+  // dataset) — that dataset is thousands of short, disconnected density
+  // fragments which read as "broken" lines when drawn on a sphere.
+  const routesToRender = TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : FALLBACK_CONFLICT_ZONES;
   const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS;
 
@@ -476,10 +658,6 @@ export default function GlobeMap({
       : [];
     return [...countries, ...zones];
   }, [countryFeatures, zonesToRender, activeLayers.conflictZones]);
-
-  // All point markers use a near-zero altitude so they render as flat
-  // discs sitting on the globe's surface, not raised 3D pillars/cylinders.
-  const FLAT_ALTITUDE = 0.003;
 
   const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
@@ -510,21 +688,6 @@ export default function GlobeMap({
           radius: 0.18,
           altitude: FLAT_ALTITUDE,
           label: `⚓ ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
-        }))
-      );
-    }
-
-    if (activeLayers.militaryBases) {
-      layerPoints.push(
-        ...(layerData?.militaryBases || []).map((base) => ({
-          id: `base-${base.id}`,
-          kind: "militaryBase" as const,
-          lat: base.lat,
-          lng: base.lng,
-          color: "#6b7d3d",
-          radius: 0.14,
-          altitude: FLAT_ALTITUDE,
-          label: `🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}`,
         }))
       );
     }
@@ -561,12 +724,10 @@ export default function GlobeMap({
 
     return [...layerPoints];
   }, [
-    activeLayers.militaryBases,
     activeLayers.navalVessels,
     activeLayers.ports,
     activeLayers.storms,
     activeLayers.wildfires,
-    layerData?.militaryBases,
     navalVessels,
     portsToRender,
     storms,
@@ -576,50 +737,76 @@ export default function GlobeMap({
   // Event markers use HTML overlays (not WebGL points) so they render as
   // crisp, sharply-defined dots with a white border + glow + pulse ring —
   // identical to the 2D map's marker style — instead of blending into the
-  // dark earth texture like the flat WebGL discs did.
-  const eventMarkers = useMemo<GlobeEventMarker[]>(
-    () =>
-      events.map((event) => ({
-        id: `event-${event.id}`,
-        lat: event.location.lat,
-        lng: event.location.lng,
-        altitude: FLAT_ALTITUDE,
-        color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.war,
-        label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
-        event,
-      })),
-    [events]
-  );
+  // dark earth texture like the flat WebGL discs did. Military bases share
+  // this same HTML-overlay layer (not the WebGL pointsData layer) so they
+  // get the identical pulsing-ring treatment as events.
+  const eventMarkers = useMemo<GlobeMarker[]>(() => {
+    const markers: GlobeMarker[] = events.map((event) => ({
+      id: `event-${event.id}`,
+      lat: event.location.lat,
+      lng: event.location.lng,
+      altitude: FLAT_ALTITUDE,
+      color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.war,
+      size: 14,
+      label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
+      kind: "event",
+      event,
+    }));
 
-  const tradeArcs = useMemo<GlobeArc[]>(() => {
-    if (!activeLayers.tradeRoutes) return [];
-    return routesToRender.flatMap((route, routeIndex) =>
-      route.points.slice(0, -1).map((point, segmentIndex) => ({
-        id: `trade-${route.name}-${segmentIndex}`,
-        startLat: point[0],
-        startLng: point[1],
-        endLat: route.points[segmentIndex + 1][0],
-        endLng: route.points[segmentIndex + 1][1],
-        color: "#d4b36a",
-        label: route.name,
-        altitude: 0.08,
-        dashLength: 0.38,
-        dashGap: 0.18,
-        dashInitialGap: ((routeIndex + segmentIndex) % 4) * 0.08,
-        dashAnimateTime: 2800,
-      }))
-    );
-  }, [activeLayers.tradeRoutes, routesToRender]);
+    if (activeLayers.militaryBases) {
+      (layerData?.militaryBases || []).forEach((base) => {
+        markers.push({
+          id: `base-${base.id}`,
+          lat: base.lat,
+          lng: base.lng,
+          altitude: FLAT_ALTITUDE,
+          color: base.isMajor ? "#d4b36a" : "#6b7d3d",
+          size: base.isMajor ? 12 : 9,
+          label: `🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}${base.isMajor ? " ★" : ""}`,
+          kind: "militaryBase",
+          base,
+        });
+      });
+    }
+
+    return markers;
+  }, [events, activeLayers.militaryBases, layerData?.militaryBases]);
 
   const pathData = useMemo<GlobePath[]>(() => {
     const paths: GlobePath[] = [];
+
+    // Trade routes render as dashed surface paths (like cables/pipelines)
+    // instead of raised arcs — arcs bulging above the surface were hard to
+    // tell apart from each other at a glance; flat glowing lines hugging
+    // the globe read much more clearly as distinct routes.
+    if (activeLayers.tradeRoutes) {
+      routesToRender.forEach((route) => {
+        paths.push({
+          id: `trade-${route.name}`,
+          points: withAltitude(route.points, 0.09),
+          color: "#f5d68a",
+          label: `📦 ${route.name}`,
+          stroke: 0.45,
+          // Solid (not dashed) so routes read as continuous, unbroken lines
+          // instead of looking glitchy/disconnected at a glance.
+          dashLength: 1,
+          dashGap: 0,
+          dashInitialGap: 0,
+          dashAnimateTime: 0,
+          // Raised well above the surface (cloud shell, borders, and higher
+          // still) so more of each route stays visible near the horizon
+          // before the globe's curvature occludes it going over the back.
+          altitude: 0.09,
+        });
+      });
+    }
 
     if (activeLayers.cables) {
       for (const cable of layerData?.cables || []) {
         cable.paths.forEach((path, index) => {
           paths.push({
             id: `cable-${cable.id}-${index}`,
-            points: path,
+            points: withAltitude(path, 0.01),
             color: "#22d3ee",
             label: `🔌 ${cable.name}`,
             stroke: 0.18,
@@ -638,7 +825,7 @@ export default function GlobeMap({
         pipeline.paths.forEach((path, index) => {
           paths.push({
             id: `pipeline-${pipeline.id}-${index}`,
-            points: path,
+            points: withAltitude(path, 0.008),
             color: pipeline.substance === "gas" ? "#eab308" : "#b45309",
             label: `${pipeline.substance === "gas" ? "🔥" : "🛢️"} ${pipeline.name}`,
             stroke: 0.22,
@@ -653,7 +840,14 @@ export default function GlobeMap({
     }
 
     return paths;
-  }, [activeLayers.cables, activeLayers.pipelines, layerData?.cables, layerData?.pipelines]);
+  }, [
+    activeLayers.tradeRoutes,
+    activeLayers.cables,
+    activeLayers.pipelines,
+    routesToRender,
+    layerData?.cables,
+    layerData?.pipelines,
+  ]);
 
   // Give every event marker the same continuous small pulse ring the 2D
   // map's ".marker-pulse-ring" CSS animation shows (fast, tight, ~2s loop),
@@ -683,7 +877,7 @@ export default function GlobeMap({
   }
 
   return (
-    <div ref={containerRef} className="relative h-full w-full bg-[#050505]">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-[#050505]">
       {/* Thin static grid overlay, matching the 2D map's radar-style grid */}
       <div
         className="pointer-events-none absolute inset-0 z-0"
@@ -714,39 +908,27 @@ export default function GlobeMap({
           htmlLng="lng"
           htmlAltitude="altitude"
           htmlElement={(d) => {
-            const marker = d as GlobeEventMarker;
+            const marker = d as GlobeMarker;
+            const size = marker.size;
             const el = document.createElement("div");
             el.style.position = "relative";
-            el.style.width = "14px";
-            el.style.height = "14px";
+            el.style.width = `${size}px`;
+            el.style.height = `${size}px`;
             el.style.cursor = "pointer";
             el.style.pointerEvents = "auto";
             el.title = marker.label;
             el.innerHTML = `
               <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${marker.color};"></div>
-              <div style="position:relative;width:14px;height:14px;border-radius:50%;background:${marker.color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${marker.color};"></div>
+              <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${marker.color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${marker.color};"></div>
             `;
             el.addEventListener("click", (evt) => {
               evt.stopPropagation();
-              onSelectEvent(marker.event);
+              if (marker.kind === "event" && marker.event) onSelectEvent(marker.event);
+              else if (marker.kind === "militaryBase" && marker.base) onSelectMilitaryBase?.(marker.base);
             });
             return el;
           }}
           htmlTransitionDuration={300}
-          arcsData={tradeArcs}
-          arcStartLat="startLat"
-          arcStartLng="startLng"
-          arcEndLat="endLat"
-          arcEndLng="endLng"
-          arcColor="color"
-          arcAltitude="altitude"
-          arcStroke={0.17}
-          arcLabel="label"
-          arcDashLength="dashLength"
-          arcDashGap="dashGap"
-          arcDashInitialGap="dashInitialGap"
-          arcDashAnimateTime="dashAnimateTime"
-          arcsTransitionDuration={0}
           polygonsData={combinedPolygons}
           polygonGeoJsonGeometry="geometry"
           polygonCapColor={(polygon) => {
@@ -763,7 +945,9 @@ export default function GlobeMap({
           }}
           polygonAltitude={(polygon) => {
             const p = polygon as { kind: "country" | "zone"; intensity?: ConflictZoneData["intensity"] };
-            if (p.kind === "country") return 0.001;
+            // Country borders sit above the cloud shell (CLOUDS_ALTITUDE = 0.006)
+            // so the cloud layer never visually swallows the outline strokes.
+            if (p.kind === "country") return CLOUDS_ALTITUDE + 0.003;
             return p.intensity === "high" ? 0.02 : p.intensity === "medium" ? 0.014 : 0.01;
           }}
           polygonLabel={(polygon) => {
@@ -777,7 +961,7 @@ export default function GlobeMap({
           }}
           pathsData={pathData}
           pathPoints="points"
-          pathPointAlt="altitude"
+          pathPointAlt={(pnt: unknown) => (pnt as [number, number, number])[2]}
           pathColor="color"
           pathStroke="stroke"
           pathLabel="label"
@@ -804,6 +988,66 @@ export default function GlobeMap({
           }}
         />
       )}
+      {/* Sweeping line — thin bright core + soft wide glow trailing behind
+          it, matching the 2D map's ScanSweep bar exactly. */}
+      <div
+        ref={sweepBarRef}
+        className="pointer-events-none absolute top-0 bottom-0 z-10"
+        style={{ left: -60, width: 120, willChange: "transform" }}
+      >
+        <div
+          className="absolute inset-0"
+          style={{ background: "linear-gradient(to right, transparent, rgba(212,179,106,0.16), transparent)" }}
+        />
+        <div
+          className="absolute top-0 bottom-0"
+          style={{
+            left: 60,
+            width: 2,
+            background: "rgba(212,179,106,0.95)",
+            boxShadow: "0 0 16px 3px rgba(212,179,106,0.6)",
+          }}
+        />
+      </div>
+      {/* Reveal flashes — positioned via a direct ref + transform, updated
+          every animation frame from the live globe projection, so they
+          track the camera's orbit instead of staying pinned to stale
+          screen coordinates from when they fired. */}
+      {sweepFlashes.map((f) => (
+        <div
+          key={f.id}
+          ref={(el) => {
+            sweepFlashElRefs.current.set(f.id, el);
+          }}
+          className="pointer-events-none absolute left-0 top-0 z-10"
+          style={{ willChange: "transform" }}
+        >
+          <div
+            className="scan-reveal-ring absolute rounded-full"
+            style={{ left: -18, top: -18, width: 36, height: 36, border: "2px solid #d4b36a" }}
+          />
+          <div
+            className="scan-label-fade absolute whitespace-nowrap rounded"
+            style={{
+              left: 12,
+              top: -10,
+              background: "#0e0e0ecc",
+              border: "1px solid #3a3a3a",
+              padding: "3px 8px",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#d4b36a",
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {f.title}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

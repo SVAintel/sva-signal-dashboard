@@ -135,6 +135,13 @@ body {
   outline-offset: 1px;
 }
 
+/* Country border overlay paints its own gold stroke along the actual country
+   shape when selected (see WorldMap.tsx) — suppress the generic rectangular
+   focus-outline box above so it doesn't double up as a distracting box. */
+.leaflet-container .country-border-path:focus {
+  outline: none;
+}
+
 /* Leaflet's default popup chrome (content wrapper + tip) ships with a hard-
    coded white background, which shows as a white sliver around our custom
    dark popup content. Re-theme it: dark background, thin gold border. */

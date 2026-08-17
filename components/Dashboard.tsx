@@ -9,9 +9,12 @@ import LiveBroadcasts from "./LiveBroadcasts";
 import AmbientAudio from "./AmbientAudio";
 import EventDetailPanel from "./EventDetailPanel";
 import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
+import MilitaryBaseDetailPanel, { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
+import CountryDetailPanel, { CountryData } from "./CountryDetailPanel";
+import { COUNTRY_DETAILS } from "@/lib/data/country-details";
 import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
-import { Event } from "@/lib/types";
+import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
 import axios from "axios";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
@@ -48,14 +51,15 @@ type MapLayerKey =
   | "pipelines"
   | "militaryBases"
   | "wildfires"
-  | "storms";
+  | "storms"
+  | "countries";
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneData[];
   ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
   cables: Array<{ id: string; name: string; paths: [number, number][][] }>;
   pipelines: Array<{ id: string; name: string; substance: "oil" | "gas"; paths: [number, number][][] }>;
-  militaryBases: Array<{ id: string; name: string; lat: number; lng: number; country: string | null; operator: string | null }>;
+  militaryBases: MilitaryBaseData[];
 };
 type NavalVessel = {
   mmsi: string;
@@ -106,11 +110,19 @@ export default function Dashboard() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
+  const [selectedMilitaryBase, setSelectedMilitaryBase] = useState<MilitaryBaseData | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<CountryData | null>(null);
+  const [verification, setVerification] = useState<VerificationFilter>("all");
+  const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("all");
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [lastFetchError, setLastFetchError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
   const [mobileView, setMobileView] = useState<"panel" | "map">("map");
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
+  // Consolidated bottom-sheet for map controls (time range, view mode, layers,
+  // legend) on phone-width screens only — desktop keeps the separate floating
+  // corner overlays untouched.
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
   const [navalVessels, setNavalVessels] = useState<NavalVessel[]>([]);
   const [navalLoading, setNavalLoading] = useState(false);
@@ -129,6 +141,7 @@ export default function Dashboard() {
     militaryBases: false,
     wildfires: false,
     storms: false,
+    countries: false,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
 
@@ -309,6 +322,10 @@ export default function Dashboard() {
       if (activeTimeRangeHours === null) return true;
       const ageMs = Date.now() - new Date(e.timestamp).getTime();
       return ageMs <= activeTimeRangeHours * 60 * 60 * 1000;
+    })
+    .filter((e) => {
+      if (verification === "all") return true;
+      return verification === "unconfirmed" ? isUnconfirmedSource(e.source) : !isUnconfirmedSource(e.source);
     });
 
   const allOn = activeCategories.length === ALL_CATEGORIES.length;
@@ -316,11 +333,27 @@ export default function Dashboard() {
   const handleEventSelect = (event: Event | null) => {
     setSelectedEvent(event);
     setDetailPanelOpen(!!event);
+    if (event) setSelectedMilitaryBase(null);
   };
 
   const handleCloseDetail = () => {
     setDetailPanelOpen(false);
     setSelectedEvent(null);
+  };
+
+  const handleMilitaryBaseSelect = (base: MilitaryBaseData | null) => {
+    setSelectedMilitaryBase(base);
+    if (base) {
+      setSelectedEvent(null);
+      setDetailPanelOpen(false);
+    }
+  };
+
+  const handleCountrySelect = (name: string) => {
+    setSelectedCountry({ name, details: COUNTRY_DETAILS[name] });
+    setSelectedEvent(null);
+    setDetailPanelOpen(false);
+    setSelectedMilitaryBase(null);
   };
 
   const toggleLayer = (layer: MapLayerKey) => {
@@ -332,12 +365,51 @@ export default function Dashboard() {
     selectedEvent,
     onSelectEvent: handleEventSelect,
     activeLayers,
-    layerData,
+    layerData:
+      layerData && militaryBaseFilter !== "all"
+        ? {
+            ...layerData,
+            militaryBases: layerData.militaryBases.filter((b) =>
+              militaryBaseFilter === "major" ? b.isMajor : !b.isMajor
+            ),
+          }
+        : layerData,
     navalVessels: activeLayers.navalVessels ? navalVessels : [],
     wildfires: activeLayers.wildfires ? wildfires : [],
     storms: activeLayers.storms ? storms : [],
     onSelectConflictZone: setSelectedConflictZone,
+    selectedMilitaryBase,
+    onSelectMilitaryBase: handleMilitaryBaseSelect,
+    onSelectCountry: handleCountrySelect,
+    selectedCountryName: selectedCountry?.name ?? null,
     mobileVisible: mobileView === "map",
+  };
+
+  // Shared layer-toggle definitions used by both the desktop dropdown and the
+  // mobile control sheet, so the two stay in sync automatically.
+  const mapLayerDefs: [MapLayerKey, string][] = [
+    ["tradeRoutes", "Trade Routes"],
+    ["conflictZones", "Conflict Zones"],
+    ["ports", "Ports"],
+    ["navalVessels", "Naval Vessels"],
+    ["cables", "Submarine Cables"],
+    ["pipelines", "Oil & Gas Pipelines"],
+    ["militaryBases", "Military Bases"],
+    ["wildfires", "Wildfires"],
+    ["storms", "Storms"],
+    ["countries", "Country Borders"],
+  ];
+  const layerStatusLabel = (key: MapLayerKey): string => {
+    if (key === "navalVessels" && activeLayers.navalVessels) {
+      return navalLoading ? "SCANNING…" : `ON (${navalVessels.length})`;
+    }
+    if (key === "wildfires" && activeLayers.wildfires) {
+      return wildfiresLoading && wildfires.length === 0 ? "LOADING…" : `ON (${wildfires.length})`;
+    }
+    if (key === "storms" && activeLayers.storms) {
+      return stormsLoading && storms.length === 0 ? "LOADING…" : `ON (${storms.length})`;
+    }
+    return activeLayers[key] ? "ON" : "OFF";
   };
 
   return (
@@ -409,7 +481,7 @@ export default function Dashboard() {
           <button
             key={view}
             onClick={() => setMobileView(view)}
-            className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
+            className={`flex-1 min-h-[44px] px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
               mobileView === view
                 ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
                 : "border-transparent text-slate-500"
@@ -435,7 +507,7 @@ export default function Dashboard() {
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
+                className={`flex-1 min-h-[44px] md:min-h-0 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
                   activeTab === tab
                     ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
                     : "border-transparent text-slate-500 hover:text-slate-300"
@@ -458,6 +530,8 @@ export default function Dashboard() {
                   loading={loading}
                   onSelectEvent={handleEventSelect}
                   selectedEvent={selectedEvent}
+                  verification={verification}
+                  onVerificationChange={setVerification}
                 />
               </div>
             )}
@@ -491,8 +565,8 @@ export default function Dashboard() {
 
         {/* Map - on RIGHT (desktop) / toggled full-screen panel (mobile) */}
         <div className={`relative flex-1 md:block ${mobileView === "map" ? "block" : "hidden"}`}>
-          {/* Time-range selector — filters map/signal events by recency */}
-          <div className="absolute left-2 top-2 z-[999] flex gap-1 sm:left-4 sm:top-4">
+          {/* Time-range selector — filters map/signal events by recency (desktop; consolidated into the mobile control sheet below on phones) */}
+          <div className="hidden md:flex absolute left-2 top-2 z-[999] gap-1 sm:left-4 sm:top-4">
             {TIME_RANGES.map((tr) => {
               const isOn = activeTimeRangeHours === tr.hours;
               return (
@@ -512,8 +586,8 @@ export default function Dashboard() {
             })}
           </div>
 
-          {/* Map legend — collapsed to a compact strip on mobile to save screen space */}
-          <div className="absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
+          {/* Map legend (desktop; consolidated into the mobile control sheet below on phones) */}
+          <div className="hidden md:block absolute bottom-2 left-2 z-[999] max-h-[40vh] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:max-h-none sm:px-3 sm:py-2 sm:text-[10px]">
             {Object.entries(categoryLabels).map(([key, val]) => (
               <div key={key} className="flex items-center gap-2 py-0.5">
                 <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
@@ -522,14 +596,14 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Event count badge */}
-          <div className="absolute right-2 top-2 z-[999] rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-[10px]">
+          {/* Event count badge (desktop; folded into the mobile control-sheet trigger below on phones) */}
+          <div className="hidden md:block absolute right-2 top-2 z-[999] rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-[10px]">
             <span className="font-bold text-[#d4b36a]">{events.length}</span>
             <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
           </div>
 
-          {/* Map controls — view toggle plus layer menu */}
-          <div className="absolute right-2 top-10 z-[999] flex flex-col items-end gap-2 sm:right-4 sm:top-12">
+          {/* Map controls — view toggle plus layer menu (desktop; consolidated into the mobile control sheet below on phones) */}
+          <div className="hidden md:flex absolute right-2 top-10 z-[999] flex-col items-end gap-2 sm:right-4 sm:top-12">
             <div className="flex items-center gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] p-1 backdrop-blur">
               {(["2d", "3d"] as const).map((mode) => {
                 const isOn = mapViewMode === mode;
@@ -544,7 +618,7 @@ export default function Dashboard() {
                     }`}
                     title={mode === "2d" ? "Show the tactical 2D map" : "Show the rotating 3D globe"}
                   >
-                    {mode}
+                    {mode === "3d" ? "3d (pre-alpha)" : mode}
                   </button>
                 );
               })}
@@ -561,19 +635,7 @@ export default function Dashboard() {
 
               {layersMenuOpen && (
                 <div className="mt-1 flex flex-col gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-2 text-[9px] backdrop-blur sm:px-3 sm:text-[10px]">
-                  {(
-                    [
-                      ["tradeRoutes", "Trade Routes"],
-                      ["conflictZones", "Conflict Zones"],
-                      ["ports", "Ports"],
-                      ["navalVessels", "Naval Vessels"],
-                      ["cables", "Submarine Cables"],
-                      ["pipelines", "Oil & Gas Pipelines"],
-                      ["militaryBases", "Military Bases"],
-                      ["wildfires", "Wildfires"],
-                      ["storms", "Storms"],
-                    ] as [MapLayerKey, string][]
-                  ).map(([key, label]) => (
+                  {mapLayerDefs.map(([key, label]) => (
                     <button
                       key={key}
                       onClick={() => toggleLayer(key)}
@@ -584,25 +646,35 @@ export default function Dashboard() {
                       }`}
                     >
                       <span>{label}</span>
-                      <span>
-                        {key === "navalVessels" && activeLayers.navalVessels
-                          ? navalLoading
-                            ? "SCANNING…"
-                            : `ON (${navalVessels.length})`
-                          : key === "wildfires" && activeLayers.wildfires
-                          ? wildfiresLoading && wildfires.length === 0
-                            ? "LOADING…"
-                            : `ON (${wildfires.length})`
-                          : key === "storms" && activeLayers.storms
-                          ? stormsLoading && storms.length === 0
-                            ? "LOADING…"
-                            : `ON (${storms.length})`
-                          : activeLayers[key]
-                          ? "ON"
-                          : "OFF"}
-                      </span>
+                      <span>{layerStatusLabel(key)}</span>
                     </button>
                   ))}
+                  {activeLayers.militaryBases && (
+                    <div className="flex items-center gap-1 px-2 py-1">
+                      {(
+                        [
+                          ["all", "All"],
+                          ["major", "Major"],
+                          ["minor", "Minor"],
+                        ] as [typeof militaryBaseFilter, string][]
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMilitaryBaseFilter(value);
+                          }}
+                          className={`flex-1 rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
+                            militaryBaseFilter === value
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {activeLayers.navalVessels && (
                     <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
                       AIS scan takes ~90s per refresh (every 30 min). Military-flagged
@@ -621,12 +693,156 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* Mobile control-sheet trigger — a single floating button that opens a
+              bottom sheet consolidating everything the four desktop overlays
+              show (time range, view mode, layer toggles, legend). Phone-only. */}
+          <button
+            onClick={() => setMobileControlsOpen(true)}
+            className="md:hidden absolute right-2 top-2 z-[999] flex min-h-[44px] items-center gap-2 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-300 backdrop-blur"
+          >
+            <span className="text-[#d4b36a]">{events.length}</span>
+            <span>Map Controls</span>
+            <span>▾</span>
+          </button>
+
+          {mobileControlsOpen && (
+            <>
+              {/* Backdrop — tap outside the sheet to dismiss */}
+              <div
+                className="md:hidden fixed inset-0 z-[1100] bg-black/50"
+                onClick={() => setMobileControlsOpen(false)}
+              />
+              <div className="md:hidden fixed inset-x-0 bottom-0 z-[1101] max-h-[75vh] overflow-y-auto rounded-t-2xl border-t border-[#3a3a3a] bg-[#0e0e0ef8] px-4 pb-6 pt-3 text-xs backdrop-blur">
+                {/* Grab handle + close */}
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="h-1 w-10 rounded-full bg-slate-700" />
+                  <button
+                    onClick={() => setMobileControlsOpen(false)}
+                    className="min-h-[44px] min-w-[44px] rounded text-slate-400"
+                  >
+                    Close ✕
+                  </button>
+                </div>
+
+                {/* Time range */}
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Time Range</p>
+                <div className="mb-4 flex gap-2">
+                  {TIME_RANGES.map((tr) => {
+                    const isOn = activeTimeRangeHours === tr.hours;
+                    return (
+                      <button
+                        key={tr.label}
+                        onClick={() => setActiveTimeRangeHours(tr.hours)}
+                        className={`min-h-[44px] flex-1 rounded border text-[11px] font-bold uppercase tracking-widest transition ${
+                          isOn
+                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                            : "border-slate-700 text-slate-500"
+                        }`}
+                      >
+                        {tr.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* View mode */}
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">View</p>
+                <div className="mb-4 flex gap-2">
+                  {(["2d", "3d"] as const).map((mode) => {
+                    const isOn = mapViewMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        onClick={() => setMapViewMode(mode)}
+                        className={`min-h-[44px] flex-1 rounded border text-[11px] font-bold uppercase tracking-[0.2em] transition ${
+                          isOn
+                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                            : "border-slate-700 text-slate-500"
+                        }`}
+                      >
+                        {mode === "3d" ? "3D (pre-alpha)" : mode}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Map layers */}
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Map Layers</p>
+                <div className="mb-4 flex flex-col gap-1.5">
+                  {mapLayerDefs.map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleLayer(key)}
+                      className={`flex min-h-[44px] items-center justify-between gap-3 rounded border px-3 uppercase tracking-wider transition ${
+                        activeLayers[key]
+                          ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                          : "border-slate-700 text-slate-500"
+                      }`}
+                    >
+                      <span>{label}</span>
+                      <span>{layerStatusLabel(key)}</span>
+                    </button>
+                  ))}
+                  {activeLayers.militaryBases && (
+                    <div className="flex items-center gap-1.5">
+                      {(
+                        [
+                          ["all", "All"],
+                          ["major", "Major"],
+                          ["minor", "Minor"],
+                        ] as [typeof militaryBaseFilter, string][]
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={() => setMilitaryBaseFilter(value)}
+                          className={`min-h-[38px] flex-1 rounded border text-center uppercase tracking-wider transition ${
+                            militaryBaseFilter === value
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Legend */}
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Legend</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                  {Object.entries(categoryLabels).map(([key, val]) => (
+                    <div key={key} className="flex items-center gap-2 py-0.5">
+                      <div
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }}
+                      />
+                      <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
           {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
 
           {/* Event Detail Panel — docked to the right edge of the map, scrollable */}
           <EventDetailPanel
             event={selectedEvent}
             onClose={handleCloseDetail}
+          />
+
+          {/* Military Base Detail Panel — docked to the right edge of the map, scrollable */}
+          <MilitaryBaseDetailPanel
+            base={selectedMilitaryBase}
+            onClose={() => setSelectedMilitaryBase(null)}
+          />
+
+          {/* Country Detail Panel — docked to the right edge of the map, scrollable */}
+          <CountryDetailPanel
+            country={selectedCountry}
+            onClose={() => setSelectedCountry(null)}
           />
         </div>
       </div>

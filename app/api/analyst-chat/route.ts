@@ -73,7 +73,13 @@ export async function POST(req: Request) {
     `mention something the user asks about, do NOT tell the user to provide data — instead answer from your own ` +
     `knowledge and the conflict reference list, and simply note that it isn't currently reflected in the live feed. ` +
     `Only flag uncertainty briefly, in passing — never make the user go fetch information for you. ` +
-    `Use concise, actionable intelligence-analyst language.\n\n` +
+    `Use concise, actionable intelligence-analyst language, and prioritize specific, concrete details — cite ` +
+    `named events, actors, locations, and figures from the live feed and conflict reference list rather than ` +
+    `vague generalities. Formatting: separate distinct topics/theaters/ideas into their own paragraphs with a ` +
+    `blank line between them so the answer is easy to scan. Let the number of paragraphs vary naturally with ` +
+    `the length and complexity of the answer — a quick factual question may only need one short paragraph, ` +
+    `while a broad situational brief may need several. Do NOT pad with extra paragraph breaks just to hit a ` +
+    `target count, and do NOT shorten or omit substantive details to fit a paragraph.\n\n` +
     `Reference: ongoing armed conflicts —\n${conflictSummary}\n\n` +
     `Live signal feed snapshot (${events.length} of the dashboard's active signals):\n${feedSummary || "No active signals currently loaded."}\n\n` +
     `Conversation so far:\n${transcript}\n\n` +

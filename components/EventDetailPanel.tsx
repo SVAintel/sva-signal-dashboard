@@ -140,13 +140,23 @@ export default function EventDetailPanel({ event, onClose }: EventDetailPanelPro
           <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
             <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Event AI Q&A</h2>
 
-            <div className="max-h-56 space-y-2 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
+            <div className="max-h-72 space-y-3 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
               {chatMessages.map((msg, idx) => (
                 <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-                  <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">
+                  <span className="mb-1 block font-bold uppercase tracking-widest text-[10px]">
                     {msg.role === "assistant" ? "AI" : "You"}
                   </span>
-                  <span>{msg.content}</span>
+                  <div className="space-y-2 leading-relaxed">
+                    {msg.content
+                      .split(/\n\s*\n/)
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .map((para, pIdx) => (
+                        <p key={pIdx} className="whitespace-pre-wrap">
+                          {para}
+                        </p>
+                      ))}
+                  </div>
                 </div>
               ))}
               {chatLoading && (

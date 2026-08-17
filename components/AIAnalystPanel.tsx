@@ -80,13 +80,23 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
         <span className="text-[10px] text-slate-500">{events.length} active signals</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3 space-y-3">
         {messages.map((msg, idx) => (
           <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-            <span className="mr-2 text-[10px] font-bold uppercase tracking-widest">
+            <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest">
               {msg.role === "assistant" ? "AI" : "You"}
             </span>
-            <span>{msg.content}</span>
+            <div className="space-y-2 leading-relaxed">
+              {msg.content
+                .split(/\n\s*\n/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .map((para, pIdx) => (
+                  <p key={pIdx} className="whitespace-pre-wrap">
+                    {para}
+                  </p>
+                ))}
+            </div>
           </div>
         ))}
         {loading && (

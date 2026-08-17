@@ -51,6 +51,13 @@ export default function LandingPage() {
           Geopolitical analysis • Market signals • Disaster tracking • Conflict intelligence
         </p>
 
+        {/* Map layers & datasets */}
+        <p className="mb-8 text-[10px] text-slate-500 leading-relaxed">
+          <span className="text-slate-400">Map Layers:</span> Live Signal Feed • Trade Routes • Conflict
+          Zones • Ports • Naval Vessels • Submarine Cables • Oil &amp; Gas Pipelines • Military Bases
+          (U.S. &amp; non-U.S.) • Wildfires • Tropical Storms • Country Borders &amp; Intel Profiles
+        </p>
+
         {/* Enter Button */}
         <button
           onClick={() => setDashboardActive(true)}
@@ -67,8 +74,16 @@ export default function LandingPage() {
 
         {/* Bottom detail text */}
         <div className="mt-16 space-y-2 text-[10px] text-slate-600 uppercase tracking-wider">
-          <p>Data Sources: NewsAPI • Alpha Vantage • USGS • GDELT • ACLED • CoinGecko • EMSC</p>
-          <p>Updating: Real-time • Categories: Conflict • Cyber • Biological • Political • Energy • Humanitarian</p>
+          <p>
+            Data Sources: RSS Think Tanks (RAND, CSIS, Brookings, Atlantic Council, Carnegie, Crisis Group,
+            Stratfor, AEI) • Alpha Vantage • USGS • GDELT • ACLED • CoinGecko • EMSC • NOAA NHC • NASA FIRMS •
+            Frankfurter FX
+          </p>
+          <p>
+            Categories: War • Counter-Terrorism • Natural Disaster • Market • Biological • Political Unrest •
+            Cyber • Nuclear • Energy • Humanitarian
+          </p>
+          <p>Updating: Real-time</p>
         </div>
       </div>
 

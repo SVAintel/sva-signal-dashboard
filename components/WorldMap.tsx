@@ -5,7 +5,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
-import { memo, useEffect, useRef, useState } from "react";
+import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
+import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const makeIcon = (color: string) =>
@@ -53,13 +55,28 @@ const navalIconNoHeading = new L.DivIcon({
   iconAnchor: [5, 5],
 });
 
-// Military base marker: small olive shield/square, static (non-pulsing)
-// since these are fixed installations, not live-tracked assets.
+// Military base marker: small olive shield/circle, static (non-pulsing)
+// since these are fixed installations, not live-tracked assets. Major,
+// well-known installations (with curated unit/mission detail) use a brighter
+// gold marker so they visually stand out from the ~900 minor OSM entries.
 const militaryBaseIcon = new L.DivIcon({
   className: "",
-  html: `<div style="width:9px;height:9px;background:#6b7d3d;border:1.5px solid rgba(212,179,106,0.8);box-shadow:0 0 4px rgba(107,125,61,0.8);"></div>`,
+  html: `<div style="position:relative;width:9px;height:9px;">
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#6b7d3d;"></div>
+    <div style="position:relative;width:9px;height:9px;border-radius:50%;background:#6b7d3d;border:1.5px solid rgba(212,179,106,0.8);box-shadow:0 0 4px rgba(107,125,61,0.8);"></div>
+  </div>`,
   iconSize: [9, 9],
   iconAnchor: [4, 4],
+});
+
+const majorMilitaryBaseIcon = new L.DivIcon({
+  className: "",
+  html: `<div style="position:relative;width:12px;height:12px;">
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#d4b36a;"></div>
+    <div style="position:relative;width:12px;height:12px;border-radius:50%;background:#d4b36a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(212,179,106,0.9);"></div>
+  </div>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
 });
 
 // Wildfire marker: flame-colored circle sized/opacity-scaled by Fire
@@ -167,6 +184,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  countries: boolean;
 }
 
 interface NavalVessel {
@@ -226,6 +244,14 @@ interface MilitaryBaseFeature {
   lng: number;
   country: string | null;
   operator: string | null;
+  isMajor: boolean;
+  details?: MilitaryBaseDetail;
+}
+
+interface CountryFeature {
+  type: "Feature";
+  properties?: { ISO_A2?: string; ADMIN?: string; NAME?: string; [key: string]: unknown };
+  geometry: { type: string; coordinates: unknown };
 }
 
 interface MapLayerData {
@@ -467,15 +493,36 @@ const EventPingRings = memo(function EventPingRings({ event }: { event: Event | 
 // stacking against markers/popups works correctly. Since that pane picks up
 // Leaflet's own pan/zoom transform, an inner wrapper counter-transforms every
 // frame so its coordinate space still matches plain screen/container points.
-function ScanSweep({ events, durationMs = 9000 }: { events: Event[]; durationMs?: number }) {
+// Generic sweep-detectable target — events and military bases are both
+// reduced to this shape so the radar sweep reveals them identically.
+interface SweepTarget {
+  id: string;
+  lat: number;
+  lng: number;
+  title: string;
+}
+
+function ScanSweep({
+  events,
+  militaryBases = [],
+  durationMs = 9000,
+}: {
+  events: Event[];
+  militaryBases?: MilitaryBaseFeature[];
+  durationMs?: number;
+}) {
   const map = useMap();
   const barRef = useRef<HTMLDivElement>(null);
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const [flashes, setFlashes] = useState<
     { id: string; lat: number; lng: number; title: string; ts: number }[]
   >([]);
-  const eventsRef = useRef(events);
-  eventsRef.current = events;
+  const targets: SweepTarget[] = [
+    ...events.map((ev) => ({ id: ev.id, lat: ev.location.lat, lng: ev.location.lng, title: ev.title })),
+    ...militaryBases.map((base) => ({ id: base.id, lat: base.lat, lng: base.lng, title: `🎯 ${base.name}` })),
+  ];
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
   // DOM refs for each flash's wrapper, so we can reposition them every frame
   // (on pan/zoom) via direct style writes instead of React re-renders.
   const flashElRefs = useRef(new Map<string, HTMLDivElement | null>());
@@ -546,13 +593,13 @@ function ScanSweep({ events, durationMs = 9000 }: { events: Event[]; durationMs?
         const lo = Math.min(prevX, currX);
         const hi = Math.max(prevX, currX);
         const newFlashes: typeof flashes = [];
-        for (const ev of eventsRef.current) {
-          const last = recentlyFlashed.get(ev.id);
+        for (const target of targetsRef.current) {
+          const last = recentlyFlashed.get(target.id);
           if (last !== undefined && t - last < durationMs * 0.5) continue;
-          const pt = map.latLngToContainerPoint([ev.location.lat, ev.location.lng]);
+          const pt = map.latLngToContainerPoint([target.lat, target.lng]);
           if (pt.x >= lo && pt.x <= hi && pt.y >= 0 && pt.y <= size.y) {
-            recentlyFlashed.set(ev.id, t);
-            newFlashes.push({ id: `${ev.id}-${t}`, lat: ev.location.lat, lng: ev.location.lng, title: ev.title, ts: t });
+            recentlyFlashed.set(target.id, t);
+            newFlashes.push({ id: `${target.id}-${t}`, lat: target.lat, lng: target.lng, title: target.title, ts: t });
           }
         }
         if (newFlashes.length > 0) {
@@ -693,6 +740,85 @@ function ScanSweep({ events, durationMs = 9000 }: { events: Event[]; durationMs?
   );
 }
 
+// Flies the map to a selected military base's location and zooms in, so
+// opening the detail panel visually centers the installation on the map.
+// Mirrors MapEventFocuser's behavior/restore-on-close pattern.
+function MapMilitaryBaseFocuser({ base }: { base: MilitaryBaseData | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (base) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const targetZoom = Math.max(map.getZoom(), 6);
+      map.flyTo([base.lat, base.lng], targetZoom, { duration: 0.9 });
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [base?.id, map]);
+
+  return null;
+}
+
+// Picks the bounds of a country's largest contiguous landmass, ignoring
+// smaller disjoint parts (e.g. France's MultiPolygon includes French Guiana,
+// Réunion, Guadeloupe, etc. — fitting the full bounding box would center the
+// view in the middle of the Atlantic between mainland France and those
+// overseas territories). Falls back to the whole feature's bounds for a
+// simple Polygon.
+function getPrimaryLandmassBounds(feature: CountryFeature): L.LatLngBounds | null {
+  const geometry = feature.geometry as { type: string; coordinates: any } | undefined;
+  if (!geometry) return null;
+  if (geometry.type !== "MultiPolygon") {
+    const bounds = L.geoJSON(feature as any).getBounds();
+    return bounds.isValid() ? bounds : null;
+  }
+  let bestBounds: L.LatLngBounds | null = null;
+  let bestArea = 0;
+  for (const coords of geometry.coordinates as any[]) {
+    const polygonFeature = { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: coords } };
+    const bounds = L.geoJSON(polygonFeature as any).getBounds();
+    if (!bounds.isValid()) continue;
+    const area = (bounds.getEast() - bounds.getWest()) * (bounds.getNorth() - bounds.getSouth());
+    if (area > bestArea) {
+      bestArea = area;
+      bestBounds = bounds;
+    }
+  }
+  return bestBounds;
+}
+
+// Flies the map to fit a selected country's actual border shape and zooms
+// in, mirroring MapEventFocuser/MapMilitaryBaseFocuser. Uses flyToBounds
+// (rather than a single flyTo point) since countries vary hugely in size —
+// this fits the whole shape in view instead of zooming to a fixed level.
+function MapCountryFocuser({ feature }: { feature: CountryFeature | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (feature) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const bounds = getPrimaryLandmassBounds(feature);
+      if (bounds && bounds.isValid()) {
+        map.flyToBounds(bounds, { duration: 0.9, padding: [40, 40], maxZoom: 6 });
+      }
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [feature, map]);
+
+  return null;
+}
+
 export default function WorldMap({
   events,
   selectedEvent,
@@ -703,6 +829,10 @@ export default function WorldMap({
   wildfires = [],
   storms = [],
   onSelectConflictZone,
+  selectedMilitaryBase = null,
+  onSelectMilitaryBase,
+  onSelectCountry,
+  selectedCountryName = null,
   mobileVisible = true,
 }: {
   events: Event[];
@@ -714,15 +844,49 @@ export default function WorldMap({
   wildfires?: Wildfire[];
   storms?: Storm[];
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
+  selectedMilitaryBase?: MilitaryBaseData | null;
+  onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
+  onSelectCountry?: (name: string) => void;
+  selectedCountryName?: string | null;
   mobileVisible?: boolean;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
   const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS.map((p) => ({ ...p, country: "N/A", size: "Unknown" }));
+  const [countryFeatures, setCountryFeatures] = useState<CountryFeature[]>([]);
+  // Lazy-load the country borders GeoJSON only once the layer is toggled on
+  // (it's ~180 features and not needed unless the user asks for it).
+  useEffect(() => {
+    if (!activeLayers.countries || countryFeatures.length > 0) return;
+    let cancelled = false;
+    fetch("https://cdn.jsdelivr.net/gh/vasturiano/react-globe.gl/example/datasets/ne_110m_admin_0_countries.geojson")
+      .then((res) => res.json())
+      .then((geojson: { features?: CountryFeature[] }) => {
+        if (cancelled) return;
+        setCountryFeatures((geojson.features || []).filter((f) => f?.properties?.ISO_A2 !== "AQ"));
+      })
+      .catch(() => {
+        if (!cancelled) setCountryFeatures([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLayers.countries, countryFeatures.length]);
   // Track each event marker's Leaflet instance so we can programmatically
   // close its popup (e.g. right when "Expand" is clicked and the map begins
   // flying/zooming into it — the popup would otherwise linger awkwardly).
   const markerRefs = useRef(new Map<string, L.Marker>());
+  // Same purpose as markerRefs above, but for military base markers so their
+  // popup can be closed right when "Expand" triggers the fly-to/zoom.
+  const baseMarkerRefs = useRef(new Map<string, L.Marker>());
+  // Look up the selected country's GeoJSON feature (for MapCountryFocuser to
+  // fly/zoom to) — memoized so its identity is stable unless the selection
+  // or the loaded feature set actually changes.
+  const selectedCountryFeature = useMemo(
+    () =>
+      countryFeatures.find((f) => (f.properties?.ADMIN || f.properties?.NAME) === selectedCountryName) || null,
+    [countryFeatures, selectedCountryName]
+  );
 
   return (
     <MapContainer
@@ -737,12 +901,43 @@ export default function WorldMap({
     >
       <MapFitter visible={mobileVisible} />
       <MapEventFocuser event={selectedEvent} />
-      <ScanSweep events={events} />
+      <MapMilitaryBaseFocuser base={selectedMilitaryBase} />
+      <MapCountryFocuser feature={selectedCountryFeature} />
+      <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
       <TileLayer
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         attribution='&copy; <a href="https://carto.com/">CARTO</a>'
         noWrap={true}
       />
+      {activeLayers.countries &&
+        countryFeatures.map((feature) => {
+          const name = feature.properties?.ADMIN || feature.properties?.NAME || "Unknown";
+          const isSelected = name === selectedCountryName;
+          const baseStyle = isSelected
+            ? { color: "#d4b36a", weight: 2.5, fillColor: "#d4b36a", fillOpacity: 0.05, className: "country-border-path" }
+            : { color: "#64748b", weight: 1, fillColor: "#64748b", fillOpacity: 0.02, className: "country-border-path" };
+          return (
+            <GeoJSON
+              key={`${name}-${isSelected}`}
+              data={feature as any}
+              style={baseStyle}
+              eventHandlers={{
+                mouseover: (e) => {
+                  if (!isSelected) e.target.setStyle({ weight: 1.6, color: "#94a3b8" });
+                },
+                mouseout: (e) => {
+                  if (!isSelected) e.target.setStyle(baseStyle);
+                },
+                click: () => {
+                  onSelectCountry?.(name);
+                },
+              }}
+            >
+              <Tooltip sticky>{`${name} (click to expand)`}</Tooltip>
+            </GeoJSON>
+          );
+        })}
+
       {activeLayers.tradeRoutes &&
         routesToRender.map((route) => (
           <Polyline
@@ -839,10 +1034,55 @@ export default function WorldMap({
 
       {activeLayers.militaryBases &&
         (layerData?.militaryBases || []).map((base) => (
-          <Marker key={base.id} position={[base.lat, base.lng]} icon={militaryBaseIcon}>
-            <Tooltip>
-              {`🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}`}
-            </Tooltip>
+          <Marker
+            key={base.id}
+            position={[base.lat, base.lng]}
+            icon={base.isMajor ? majorMilitaryBaseIcon : militaryBaseIcon}
+            ref={(m) => {
+              if (m) baseMarkerRefs.current.set(base.id, m);
+              else baseMarkerRefs.current.delete(base.id);
+            }}
+            eventHandlers={{
+              click: (e) => e.target.setZIndexOffset(1000),
+              popupclose: (e) => e.target.setZIndexOffset(0),
+            }}
+          >
+            <Popup className="tactical-popup">
+              <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+                <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                  Military Installation{base.isMajor ? " • Major" : ""}
+                </div>
+                <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{base.name}</div>
+                <div style={{ color: "#64748b", fontSize: "11px" }}>
+                  {base.country || "Location unconfirmed"}{base.operator ? ` — ${base.operator}` : ""}
+                </div>
+                <button
+                  onClick={() => {
+                    // Close the popup immediately — the map is about to
+                    // fly/zoom in on this base and the side detail panel
+                    // takes over as the source of truth.
+                    baseMarkerRefs.current.get(base.id)?.closePopup();
+                    onSelectMilitaryBase?.(base);
+                  }}
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    border: "1px solid #3a3a3a",
+                    background: "#1e1e1e",
+                    color: "#d4b36a",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Expand
+                </button>
+              </div>
+            </Popup>
           </Marker>
         ))}
 

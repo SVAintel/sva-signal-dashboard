@@ -3,6 +3,7 @@ import { CONFLICTS } from "@/lib/conflict-data";
 import cablesData from "@/lib/data/cables.json";
 import pipelinesData from "@/lib/data/pipelines.json";
 import militaryBasesData from "@/lib/data/military-bases.json";
+import { MILITARY_BASE_DETAILS, type MilitaryBaseDetail } from "@/lib/data/military-base-details";
 
 // Underlying datasets already carry long revalidate windows (6h/12h/7d) below.
 // This route has no dynamic API usage of its own though, so without
@@ -58,6 +59,8 @@ interface MilitaryBaseFeature {
   lng: number;
   country: string | null;
   operator: string | null;
+  isMajor: boolean;
+  details?: MilitaryBaseDetail;
 }
 
 interface ConflictZoneOutput {
@@ -209,7 +212,10 @@ export async function GET() {
     // Cables, pipelines, and military bases are pre-parsed static snapshots — no live fetch.
     const cables = cablesData as CableFeature[];
     const pipelines = pipelinesData as PipelineFeature[];
-    const militaryBases = militaryBasesData as MilitaryBaseFeature[];
+    const militaryBases = (militaryBasesData as Omit<MilitaryBaseFeature, "isMajor" | "details">[]).map((base) => {
+      const details = MILITARY_BASE_DETAILS[base.id];
+      return { ...base, country: details?.country ?? base.country, isMajor: Boolean(details), details };
+    });
 
     return NextResponse.json({ tradeRoutes, conflictZones, ports, cables, pipelines, militaryBases });
   } catch (error) {
