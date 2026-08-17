@@ -1004,19 +1004,8 @@ export default function GlobeMap({
     // direction to actually add coverage instead of just duplicating it.
     const PROXIMITY_PX = 34;
 
-    const handleCapture = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      // Clicks that already land on a marker (or its hit-area/pulse ring)
-      // are handled by the marker's own click listener — don't double-fire.
-      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) return;
-      // Ignore clicks on the popup card itself (Expand button, etc.).
-      if (target?.closest("[data-globe-popup]")) return;
-
-      const rect = container.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+    const findNearestMarker = (x: number, y: number): GlobeMarker | null => {
       const camera = globe.camera();
-
       let nearest: GlobeMarker | null = null;
       let nearestDist = PROXIMITY_PX;
       for (const marker of eventMarkersRef.current) {
@@ -1033,6 +1022,60 @@ export default function GlobeMap({
           nearest = marker;
         }
       }
+      return nearest;
+    };
+
+    // globe.gl's own click detection runs off a `pointerup` listener on
+    // this same container (see suppressGlobeClickRef's declaration above),
+    // firing its onPolygonClick/onGlobeClick callback one animation frame
+    // later. On desktop, the browser's synchronous `click` event (which is
+    // what sets that suppress flag) always fires before that next frame,
+    // so timing lines up fine. On mobile, though, some browsers/webviews
+    // impose a delay before dispatching the synthetic `click` event after
+    // a tap — long enough that globe.gl's rAF-deferred callback can run
+    // FIRST, unguarded, closing/overwriting the marker popup before the
+    // marker's own `click` handler ever gets a chance to set the flag.
+    // Fix: pre-arm the suppress flag immediately on `pointerdown` (which
+    // always fires instantly, with no such delay, on every platform) for
+    // any tap that starts on or near a marker — well before globe.gl's own
+    // pointerup-triggered click detection has a chance to run.
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-globe-popup]")) return;
+      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) {
+        suppressGlobeClickRef.current = true;
+        setTimeout(() => {
+          suppressGlobeClickRef.current = false;
+        }, 400);
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (findNearestMarker(x, y)) {
+        suppressGlobeClickRef.current = true;
+        // Failsafe: if this turns out not to be a genuine tap (e.g. the
+        // user starts dragging the globe from here instead), don't leave
+        // the flag stuck on forever and silently swallow a later, unrelated
+        // country click.
+        setTimeout(() => {
+          suppressGlobeClickRef.current = false;
+        }, 400);
+      }
+    };
+
+    const handleCapture = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Clicks that already land on a marker (or its hit-area/pulse ring)
+      // are handled by the marker's own click listener — don't double-fire.
+      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) return;
+      // Ignore clicks on the popup card itself (Expand button, etc.).
+      if (target?.closest("[data-globe-popup]")) return;
+
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const nearest = findNearestMarker(x, y);
 
       if (nearest) {
         e.preventDefault();
@@ -1041,8 +1084,12 @@ export default function GlobeMap({
       }
     };
 
+    container.addEventListener("pointerdown", handlePointerDown, true);
     container.addEventListener("click", handleCapture, true);
-    return () => container.removeEventListener("click", handleCapture, true);
+    return () => {
+      container.removeEventListener("pointerdown", handlePointerDown, true);
+      container.removeEventListener("click", handleCapture, true);
+    };
   }, [globeReady, openMarkerPopup]);
 
   const pathData = useMemo<GlobePath[]>(() => {
