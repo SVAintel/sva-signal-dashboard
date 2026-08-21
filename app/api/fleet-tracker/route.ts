@@ -4,6 +4,9 @@ import path from "path";
 import { lookupFleetRegionCoords, lookupFleetRegionEventKeywords } from "@/lib/data/fleet-region-coords";
 import { summarizeShipCapabilities } from "@/lib/data/ship-class-info";
 import { generateMockEvents } from "@/lib/event-generator";
+import { recordFleetSnapshot } from "@/lib/db";
+import type { FleetGroup } from "@/lib/data/fleet-group-type";
+export type { FleetGroup } from "@/lib/data/fleet-group-type";
 
 // USNI News' weekly "Fleet and Marine Tracker" — approximate positions of
 // deployed U.S. Navy carrier strike groups / amphibious ready groups /
@@ -22,19 +25,6 @@ const GEMINI_MODEL = "gemini-3.5-flash-lite";
 // often the AI mission-set/outlook analysis below is regenerated.
 const CACHE_MS = 12 * 60 * 60 * 1000;
 const CACHE_FILE = path.join(process.cwd(), ".fleet-tracker-cache.json");
-
-export interface FleetGroup {
-  id: string;
-  region: string;
-  lat: number;
-  lng: number;
-  groupName: string | null;
-  ships: string[];
-  summary: string;
-  capabilities: string;
-  missionSet: string;
-  outlook: string;
-}
 
 interface FleetCache {
   groups: FleetGroup[];
@@ -294,6 +284,10 @@ export async function GET() {
         if (fresh) {
           g.__fleetTrackerCache = fresh;
           writeCacheToDisk(fresh);
+          // Append (not overwrite) into Postgres history so weekly-brief
+          // generation has real trailing data, unlike the disk cache above
+          // which only ever holds the current edition.
+          await recordFleetSnapshot(fresh.groups, fresh.sourceUrl, fresh.publishedAt);
         }
       } catch (error) {
         console.error("[fleet-tracker] refresh failed, serving stale/empty cache:", error);

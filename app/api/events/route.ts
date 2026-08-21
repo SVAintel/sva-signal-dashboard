@@ -1,4 +1,5 @@
 import { generateMockEvents } from "@/lib/event-generator";
+import { recordEventSnapshot } from "@/lib/db";
 
 // Underlying external APIs (NewsAPI especially) have strict daily quotas, so the
 // individual source fetches inside event-generator.ts carry their own longer,
@@ -15,6 +16,10 @@ export const revalidate = 900;
 export async function GET() {
   try {
     const events = await generateMockEvents();
+    // Persist this poll into history for the weekly-brief feature. Awaited
+    // (not fire-and-forget) since serverless functions can be frozen/killed
+    // right after the response is sent, which would silently drop writes.
+    await recordEventSnapshot(events);
     return Response.json(events);
   } catch (error) {
     console.error("API error:", error);

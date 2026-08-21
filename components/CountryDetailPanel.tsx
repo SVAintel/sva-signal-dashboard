@@ -19,11 +19,21 @@ interface ChatMessage {
   content: string;
 }
 
+interface RegionBriefResponse {
+  brief: string;
+  eventCount: number;
+  fleetMatchCount: number;
+  windowDays: number;
+}
+
 export default function CountryDetailPanel({ country, onClose }: CountryDetailPanelProps) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [brief, setBrief] = useState<RegionBriefResponse | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!country) {
@@ -39,7 +49,26 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
     setChatInput("");
     setChatError(null);
     setChatLoading(false);
+    setBrief(null);
+    setBriefError(null);
+    setBriefLoading(false);
   }, [country?.name]);
+
+  const generateBrief = async () => {
+    if (!country || briefLoading) return;
+    setBriefLoading(true);
+    setBriefError(null);
+    try {
+      const res = await fetch(`/api/region-brief?region=${encodeURIComponent(country.name)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Brief request failed");
+      setBrief(data);
+    } catch (err) {
+      setBriefError(err instanceof Error ? err.message : "Brief request failed");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
 
   const sendChatMessage = async () => {
     if (!country) return;
@@ -97,6 +126,48 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
         </div>
 
         <div className="space-y-6 p-5">
+          <div className="rounded border border-sky-700/40 bg-sky-950/10 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-bold uppercase text-sky-400">
+                <span className="h-2 w-2 rounded-full bg-sky-400" />
+                7-Day Regional Brief
+              </h2>
+              <button
+                onClick={generateBrief}
+                disabled={briefLoading}
+                className={`shrink-0 rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition ${
+                  briefLoading
+                    ? "cursor-not-allowed border-slate-700 text-slate-600"
+                    : "border-sky-500 text-sky-400 hover:bg-sky-950/40"
+                }`}
+              >
+                {briefLoading ? "Generating..." : brief ? "Regenerate" : "Generate"}
+              </button>
+            </div>
+
+            {briefError && <p className="text-[11px] text-red-400">{briefError}</p>}
+
+            {brief ? (
+              <>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{brief.brief}</p>
+                <p className="mt-3 text-[10px] text-slate-500">
+                  Synthesized from {brief.eventCount} tracked event{brief.eventCount === 1 ? "" : "s"}
+                  {brief.fleetMatchCount > 0
+                    ? ` and ${brief.fleetMatchCount} nearby fleet group${brief.fleetMatchCount === 1 ? "" : "s"}`
+                    : ""}{" "}
+                  captured over the last {brief.windowDays} days — analytical synthesis, not a primary source.
+                </p>
+              </>
+            ) : (
+              !briefLoading && (
+                <p className="text-sm leading-relaxed text-slate-400">
+                  Generate an AI-synthesized summary of this region's tracked events, military posture, and outlook
+                  over the last 7 days.
+                </p>
+              )
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3 border-b border-[#3a3a3a] pb-4 sm:grid-cols-3">
             <div>
               <p className="text-xs font-semibold uppercase text-slate-600">Capital</p>

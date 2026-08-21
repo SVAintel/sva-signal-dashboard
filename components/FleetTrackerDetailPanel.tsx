@@ -1,19 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-
-export interface FleetGroup {
-  id: string;
-  region: string;
-  lat: number;
-  lng: number;
-  groupName: string | null;
-  ships: string[];
-  summary: string;
-  capabilities: string;
-  missionSet: string;
-  outlook: string;
-}
+import type { FleetGroup } from "@/lib/data/fleet-group-type";
+export type { FleetGroup } from "@/lib/data/fleet-group-type";
 
 interface FleetTrackerDetailPanelProps {
   group: FleetGroup | null;
@@ -22,12 +12,45 @@ interface FleetTrackerDetailPanelProps {
   onClose: () => void;
 }
 
+interface RegionBriefResponse {
+  brief: string;
+  eventCount: number;
+  fleetMatchCount: number;
+  windowDays: number;
+}
+
 export default function FleetTrackerDetailPanel({ group, sourceUrl, publishedAt, onClose }: FleetTrackerDetailPanelProps) {
+  const [brief, setBrief] = useState<RegionBriefResponse | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBrief(null);
+    setBriefError(null);
+    setBriefLoading(false);
+  }, [group?.id]);
+
   if (!group) return null;
 
   const publishedLabel = publishedAt
     ? new Date(publishedAt).toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })
     : null;
+
+  const generateBrief = async () => {
+    if (briefLoading) return;
+    setBriefLoading(true);
+    setBriefError(null);
+    try {
+      const res = await fetch(`/api/region-brief?region=${encodeURIComponent(group.region)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Brief request failed");
+      setBrief(data);
+    } catch (err) {
+      setBriefError(err instanceof Error ? err.message : "Brief request failed");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
 
   return (
     <div className="absolute inset-y-0 right-0 z-[1200] flex w-full max-w-full sm:max-w-[420px] pointer-events-none">
@@ -48,6 +71,48 @@ export default function FleetTrackerDetailPanel({ group, sourceUrl, publishedAt,
         </div>
 
         <div className="space-y-6 p-5">
+          <div className="rounded border border-sky-700/40 bg-sky-950/10 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-sm font-bold uppercase text-sky-400">
+                <span className="h-2 w-2 rounded-full bg-sky-400" />
+                7-Day Regional Brief
+              </h2>
+              <button
+                onClick={generateBrief}
+                disabled={briefLoading}
+                className={`shrink-0 rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition ${
+                  briefLoading
+                    ? "cursor-not-allowed border-slate-700 text-slate-600"
+                    : "border-sky-500 text-sky-400 hover:bg-sky-950/40"
+                }`}
+              >
+                {briefLoading ? "Generating..." : brief ? "Regenerate" : "Generate"}
+              </button>
+            </div>
+
+            {briefError && <p className="text-[11px] text-red-400">{briefError}</p>}
+
+            {brief ? (
+              <>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{brief.brief}</p>
+                <p className="mt-3 text-[10px] text-slate-500">
+                  Synthesized from {brief.eventCount} tracked event{brief.eventCount === 1 ? "" : "s"}
+                  {brief.fleetMatchCount > 0
+                    ? ` and ${brief.fleetMatchCount} nearby fleet group${brief.fleetMatchCount === 1 ? "" : "s"}`
+                    : ""}{" "}
+                  captured over the last {brief.windowDays} days — analytical synthesis, not a primary source.
+                </p>
+              </>
+            ) : (
+              !briefLoading && (
+                <p className="text-sm leading-relaxed text-slate-400">
+                  Generate an AI-synthesized summary of tracked events and fleet activity near this region over the
+                  last 7 days.
+                </p>
+              )
+            )}
+          </div>
+
           <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase text-[#d4b36a]">
               <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
