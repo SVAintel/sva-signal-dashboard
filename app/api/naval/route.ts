@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import fs from "fs";
 import path from "path";
 
-// Best-effort naval vessel layer via AISStream.io.
+// Best-effort naval vessel + oil tanker layer via AISStream.io.
 //
 // IMPORTANT caveats (surfaced to the user before building this):
 // - Military vessels routinely disable AIS for operational security, so this
@@ -38,12 +38,13 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
+  kind: "military" | "tanker";
 }
 
 const CACHE_MS = 30 * 60 * 1000; // 30 minutes — matches the client polling interval
 const CACHE_FILE = path.join(process.cwd(), ".naval-cache.json");
 
-type NavalCache = { data: NavalVessel[]; ts: number };
+type NavalCache = { data: NavalVessel[]; ts: number; outage?: boolean };
 
 // GET requests must NEVER block on a live 90s AIS scan. Instead, a
 // self-scheduling background refresh loop (re-armed every CACHE_MS) keeps a
@@ -76,8 +77,13 @@ function writeCacheToDisk(cache: NavalCache) {
 // AIS "Type of ship and cargo" code 35 = "Military ops" — the only official
 // designation for warships/naval vessels that choose to self-identify.
 const MILITARY_SHIP_TYPE = 35;
+// AIS ship-type codes 80-89 cover the "Tanker" category (crude/product oil,
+// chemical, and other liquid bulk carriers) — the closest official AIS
+// designation to "oil tankers" without needing per-cargo classification
+// data that isn't broadcast over AIS.
+const isTankerShipType = (t: number | null) => t !== null && t >= 80 && t <= 89;
 
-async function collectNavalVessels(): Promise<NavalVessel[]> {
+async function collectNavalVessels(): Promise<{ vessels: NavalVessel[]; outage: boolean }> {
   return new Promise((resolve) => {
     const positions = new Map<string, { lat: number; lng: number; course: number | null; speed: number | null }>();
     const staticData = new Map<string, { name: string; shipType: number | null }>();
@@ -95,7 +101,9 @@ async function collectNavalVessels(): Promise<NavalVessel[]> {
       }
       const out: NavalVessel[] = [];
       for (const [mmsi, sd] of staticData.entries()) {
-        if (sd.shipType !== MILITARY_SHIP_TYPE) continue;
+        const isMilitary = sd.shipType === MILITARY_SHIP_TYPE;
+        const isTanker = isTankerShipType(sd.shipType);
+        if (!isMilitary && !isTanker) continue;
         const pos = positions.get(mmsi);
         if (!pos) continue;
         out.push({
@@ -106,10 +114,18 @@ async function collectNavalVessels(): Promise<NavalVessel[]> {
           course: pos.course,
           speed: pos.speed,
           shipType: sd.shipType,
+          kind: isMilitary ? "military" : "tanker",
         });
       }
-      console.log(`[naval] AIS window closed: ${positions.size} position reports, ${staticData.size} static reports, ${out.length} military matches`);
-      resolve(out);
+      // Zero position AND static reports means AISStream never sent any AIS
+      // traffic at all during the whole window — not "no matching vessels",
+      // but the feed itself being empty (their beta service has had known
+      // outages where connections succeed but no data is ever streamed).
+      // Distinguish this from a legitimate scan that saw traffic but no
+      // military/tanker matches, so the UI can surface an honest status.
+      const outage = positions.size === 0 && staticData.size === 0;
+      console.log(`[naval] AIS window closed: ${positions.size} position reports, ${staticData.size} static reports, ${out.length} matches${outage ? " (no AIS traffic received — possible feed outage)" : ""}`);
+      resolve({ vessels: out, outage });
     };
 
     const timer = setTimeout(finish, COLLECT_WINDOW_MS);
@@ -182,6 +198,7 @@ export async function GET() {
     lastUpdated: cache?.ts || null,
     stale: ageMs !== null && ageMs > CACHE_MS,
     refreshing: !!g.__navalRefreshing,
+    outage: !!cache?.outage,
   });
 }
 
@@ -189,8 +206,8 @@ async function runRefresh() {
   if (g.__navalRefreshing) return;
   g.__navalRefreshing = true;
   try {
-    const vessels = await collectNavalVessels();
-    const cache: NavalCache = { data: vessels, ts: Date.now() };
+    const { vessels, outage } = await collectNavalVessels();
+    const cache: NavalCache = { data: vessels, ts: Date.now(), outage };
     g.__navalCache = cache;
     writeCacheToDisk(cache);
   } catch (error) {

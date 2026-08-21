@@ -7,6 +7,7 @@ import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import type { FleetGroup } from "./FleetTrackerDetailPanel";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -37,24 +38,31 @@ const icons: Record<string, L.DivIcon> = {
 
 // Naval vessel marker: a small square/diamond in slate-blue to visually
 // distinguish AIS-tracked ships from category event markers, with a heading
-// arrow when course data is available.
-const navalIcon = (course: number | null) =>
-  new L.DivIcon({
+// arrow when course data is available. Tankers reuse the same shapes in
+// amber (matching the oil pipeline color elsewhere) so the two vessel kinds
+// stay visually distinct at a glance.
+const navalIcon = (course: number | null, kind: "military" | "tanker") => {
+  const color = kind === "tanker" ? "#eab308" : "#7dd3fc";
+  return new L.DivIcon({
     className: "",
     html: `<div style="position:relative;width:14px;height:14px;transform:rotate(${course ?? 0}deg);">
       <div style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%);
-        border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:12px solid #7dd3fc;
-        filter:drop-shadow(0 0 4px rgba(125,211,252,0.8));"></div>
+        border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:12px solid ${color};
+        filter:drop-shadow(0 0 4px ${color});"></div>
     </div>`,
     iconSize: [14, 14],
     iconAnchor: [7, 7],
   });
-const navalIconNoHeading = new L.DivIcon({
-  className: "",
-  html: `<div style="width:10px;height:10px;background:#7dd3fc;border:2px solid rgba(255,255,255,0.6);border-radius:2px;box-shadow:0 0 6px #7dd3fc;"></div>`,
-  iconSize: [10, 10],
-  iconAnchor: [5, 5],
-});
+};
+const navalIconNoHeading = (kind: "military" | "tanker") => {
+  const color = kind === "tanker" ? "#eab308" : "#7dd3fc";
+  return new L.DivIcon({
+    className: "",
+    html: `<div style="width:10px;height:10px;background:${color};border:2px solid rgba(255,255,255,0.6);border-radius:2px;box-shadow:0 0 6px ${color};"></div>`,
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+  });
+};
 
 // Military base marker: small olive shield/circle, static (non-pulsing)
 // since these are fixed installations, not live-tracked assets. Major,
@@ -77,6 +85,19 @@ const majorMilitaryBaseIcon = new L.DivIcon({
     <div style="position:relative;width:12px;height:12px;border-radius:50%;background:#d4b36a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(212,179,106,0.9);"></div>
   </div>`,
   iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
+
+// Fleet-tracker group marker: distinct sky-blue diamond so approximate CSG/
+// ARG positions (from USNI's weekly report) read differently at a glance
+// from both live AIS naval dots and the olive/gold military-base markers.
+const fleetGroupIcon = new L.DivIcon({
+  className: "",
+  html: `<div style="position:relative;width:13px;height:13px;">
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;"></div>
+    <div style="position:relative;width:13px;height:13px;transform:rotate(45deg);background:#38bdf8;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(56,189,248,0.9);"></div>
+  </div>`,
+  iconSize: [13, 13],
   iconAnchor: [6, 6],
 });
 
@@ -185,6 +206,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  fleetTracker: boolean;
   countries: boolean;
 }
 
@@ -196,6 +218,7 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
+  kind: "military" | "tanker";
 }
 
 interface Wildfire {
@@ -765,6 +788,29 @@ function MapMilitaryBaseFocuser({ base }: { base: MilitaryBaseData | null }) {
   return null;
 }
 
+// Flies the map to a selected fleet-tracker group's approximate region and
+// zooms in, mirroring MapMilitaryBaseFocuser.
+function MapFleetGroupFocuser({ group }: { group: FleetGroup | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (group) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const targetZoom = Math.max(map.getZoom(), 4);
+      map.flyTo([group.lat, group.lng], targetZoom, { duration: 0.9 });
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [group?.id, map]);
+
+  return null;
+}
+
 // Picks the bounds of a country's largest contiguous landmass, ignoring
 // smaller disjoint parts (e.g. France's MultiPolygon includes French Guiana,
 // Réunion, Guadeloupe, etc. — fitting the full bounding box would center the
@@ -832,6 +878,9 @@ export default function WorldMap({
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
+  fleetGroups = [],
+  selectedFleetGroup = null,
+  onSelectFleetGroup,
   onSelectCountry,
   selectedCountryName = null,
   mobileVisible = true,
@@ -847,6 +896,9 @@ export default function WorldMap({
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
   selectedMilitaryBase?: MilitaryBaseData | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
+  fleetGroups?: FleetGroup[];
+  selectedFleetGroup?: FleetGroup | null;
+  onSelectFleetGroup?: (group: FleetGroup) => void;
   onSelectCountry?: (name: string) => void;
   selectedCountryName?: string | null;
   mobileVisible?: boolean;
@@ -880,6 +932,8 @@ export default function WorldMap({
   // Same purpose as markerRefs above, but for military base markers so their
   // popup can be closed right when "Expand" triggers the fly-to/zoom.
   const baseMarkerRefs = useRef(new Map<string, L.Marker>());
+  // Same purpose again, but for fleet-tracker group markers.
+  const fleetMarkerRefs = useRef(new Map<string, L.Marker>());
   // Same purpose again, but for country border GeoJSON layers.
   const countryLayerRefs = useRef(new Map<string, L.GeoJSON>());
   // Look up the selected country's GeoJSON feature (for MapCountryFocuser to
@@ -905,6 +959,7 @@ export default function WorldMap({
       <MapFitter visible={mobileVisible} />
       <MapEventFocuser event={selectedEvent} />
       <MapMilitaryBaseFocuser base={selectedMilitaryBase} />
+      <MapFleetGroupFocuser group={selectedFleetGroup} />
       <MapCountryFocuser feature={selectedCountryFeature} />
       <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
       <TileLayer
@@ -1030,10 +1085,10 @@ export default function WorldMap({
           <Marker
             key={vessel.mmsi}
             position={[vessel.lat, vessel.lng]}
-            icon={vessel.course !== null ? navalIcon(vessel.course) : navalIconNoHeading}
+            icon={vessel.course !== null ? navalIcon(vessel.course, vessel.kind) : navalIconNoHeading(vessel.kind)}
           >
             <Tooltip>
-              {`⚓ ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`}
+              {`${vessel.kind === "tanker" ? "🛢️" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`}
             </Tooltip>
           </Marker>
         ))}
@@ -1099,6 +1154,60 @@ export default function WorldMap({
                     // takes over as the source of truth.
                     baseMarkerRefs.current.get(base.id)?.closePopup();
                     onSelectMilitaryBase?.(base);
+                  }}
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    border: "1px solid #3a3a3a",
+                    background: "#1e1e1e",
+                    color: "#d4b36a",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Expand
+                </button>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
+      {activeLayers.fleetTracker &&
+        fleetGroups.map((group) => (
+          <Marker
+            key={group.id}
+            position={[group.lat, group.lng]}
+            icon={fleetGroupIcon}
+            ref={(m) => {
+              if (m) fleetMarkerRefs.current.set(group.id, m);
+              else fleetMarkerRefs.current.delete(group.id);
+            }}
+            eventHandlers={{
+              click: (e) => e.target.setZIndexOffset(1000),
+              popupclose: (e) => e.target.setZIndexOffset(0),
+            }}
+          >
+            <Popup className="tactical-popup">
+              <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "200px" }}>
+                <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                  US Fleet Tracker{group.groupName ? ` • ${group.groupName}` : ""}
+                </div>
+                <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>
+                  🇺🇸⚓ {group.region}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "11px" }}>
+                  {group.ships.length > 0 ? group.ships.slice(0, 2).join(", ") : "See detail for ship list"}
+                  {group.ships.length > 2 ? ` +${group.ships.length - 2} more` : ""}
+                </div>
+                <button
+                  onClick={() => {
+                    fleetMarkerRefs.current.get(group.id)?.closePopup();
+                    onSelectFleetGroup?.(group);
                   }}
                   style={{
                     marginTop: "8px",

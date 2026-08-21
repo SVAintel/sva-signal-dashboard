@@ -10,6 +10,7 @@ import AmbientAudio from "./AmbientAudio";
 import EventDetailPanel from "./EventDetailPanel";
 import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import MilitaryBaseDetailPanel, { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
+import FleetTrackerDetailPanel, { FleetGroup } from "./FleetTrackerDetailPanel";
 import CountryDetailPanel, { CountryData } from "./CountryDetailPanel";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
 import AIAnalystPanel from "./AIAnalystPanel";
@@ -52,6 +53,7 @@ type MapLayerKey =
   | "militaryBases"
   | "wildfires"
   | "storms"
+  | "fleetTracker"
   | "countries";
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
@@ -69,6 +71,7 @@ type NavalVessel = {
   course: number | null;
   speed: number | null;
   shipType: number | null;
+  kind: "military" | "tanker";
 };
 type Wildfire = {
   lat: number;
@@ -111,9 +114,11 @@ export default function Dashboard() {
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
   const [selectedMilitaryBase, setSelectedMilitaryBase] = useState<MilitaryBaseData | null>(null);
+  const [selectedFleetGroup, setSelectedFleetGroup] = useState<FleetGroup | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<CountryData | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
+  const [fleetRegionFilter, setFleetRegionFilter] = useState<string>("all");
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [lastFetchError, setLastFetchError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
@@ -127,10 +132,16 @@ export default function Dashboard() {
   const [navalVessels, setNavalVessels] = useState<NavalVessel[]>([]);
   const [navalLoading, setNavalLoading] = useState(false);
   const [navalLastChecked, setNavalLastChecked] = useState<string>("");
+  const [navalOutage, setNavalOutage] = useState(false);
   const [wildfires, setWildfires] = useState<Wildfire[]>([]);
   const [wildfiresLoading, setWildfiresLoading] = useState(false);
   const [storms, setStorms] = useState<Storm[]>([]);
   const [stormsLoading, setStormsLoading] = useState(false);
+  const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
+  const [fleetLoading, setFleetLoading] = useState(false);
+  const [fleetLastChecked, setFleetLastChecked] = useState<string>("");
+  const [fleetSourceUrl, setFleetSourceUrl] = useState<string | null>(null);
+  const [fleetPublishedAt, setFleetPublishedAt] = useState<string | null>(null);
   const [activeLayers, setActiveLayers] = useState({
     tradeRoutes: false,
     conflictZones: false,
@@ -141,6 +152,7 @@ export default function Dashboard() {
     militaryBases: false,
     wildfires: false,
     storms: false,
+    fleetTracker: false,
     countries: true,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
@@ -245,14 +257,15 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Naval vessel layer is a live, best-effort AIS feed (military-flagged ships
-  // only, sparse coverage) — only poll it while the layer is actually toggled
-  // on, since each request opens a short-lived upstream WebSocket connection.
-  // Server now self-refreshes the AIS scan every 30 min in the background and
-  // persists results to disk (see app/api/naval/route.ts) — GET here is an
-  // instant read of that cache, never a live 90s scan. Poll frequently so the
-  // "SCANNING…" status and vessel count update promptly once a background
-  // refresh completes, without any cost since reads are cheap.
+  // Naval vessel layer is a live, best-effort AIS feed (military-flagged and
+  // tanker-flagged ships only, sparse coverage) — only poll it while the
+  // layer is actually toggled on, since each request opens a short-lived
+  // upstream WebSocket connection. Server now self-refreshes the AIS scan
+  // every 30 min in the background and persists results to disk (see
+  // app/api/naval/route.ts) — GET here is an instant read of that cache,
+  // never a live 90s scan. Poll frequently so the "SCANNING…" status and
+  // vessel count update promptly once a background refresh completes,
+  // without any cost since reads are cheap.
   useEffect(() => {
     if (!activeLayers.navalVessels) return;
     const fetchNaval = async () => {
@@ -260,6 +273,7 @@ export default function Dashboard() {
         const res = await axios.get("/api/naval");
         setNavalVessels(res.data?.vessels || []);
         setNavalLoading(!!res.data?.refreshing);
+        setNavalOutage(!!res.data?.outage);
         setNavalLastChecked(
           res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : ""
         );
@@ -313,6 +327,34 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [activeLayers.storms]);
 
+  // US Fleet Tracker: USNI News' weekly Fleet and Marine Tracker report,
+  // scraped server-side (see app/api/fleet-tracker/route.ts) and cached for
+  // 12h — USNI only publishes a new edition roughly weekly, so there's no
+  // need to poll more often than that; the interval here just picks up a
+  // fresh edition within a few hours of it going live.
+  useEffect(() => {
+    if (!activeLayers.fleetTracker) return;
+    const fetchFleetTracker = async () => {
+      try {
+        setFleetLoading(true);
+        const res = await axios.get("/api/fleet-tracker");
+        setFleetGroups(res.data?.groups || []);
+        setFleetSourceUrl(res.data?.sourceUrl || null);
+        setFleetPublishedAt(res.data?.publishedAt || null);
+        setFleetLastChecked(
+          res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : ""
+        );
+      } catch (error) {
+        console.error("Failed to fetch fleet tracker:", error);
+      } finally {
+        setFleetLoading(false);
+      }
+    };
+    fetchFleetTracker();
+    const interval = setInterval(fetchFleetTracker, 60 * 60 * 1000); // 1h
+    return () => clearInterval(interval);
+  }, [activeLayers.fleetTracker]);
+
   useEffect(() => {
     const stored = window.localStorage.getItem("dashboard-map-view-mode");
     if (stored === "2d" || stored === "3d") {
@@ -350,7 +392,10 @@ export default function Dashboard() {
   const handleEventSelect = (event: Event | null) => {
     setSelectedEvent(event);
     setDetailPanelOpen(!!event);
-    if (event) setSelectedMilitaryBase(null);
+    if (event) {
+      setSelectedMilitaryBase(null);
+      setSelectedFleetGroup(null);
+    }
   };
 
   const handleCloseDetail = () => {
@@ -363,6 +408,16 @@ export default function Dashboard() {
     if (base) {
       setSelectedEvent(null);
       setDetailPanelOpen(false);
+      setSelectedFleetGroup(null);
+    }
+  };
+
+  const handleFleetGroupSelect = (group: FleetGroup | null) => {
+    setSelectedFleetGroup(group);
+    if (group) {
+      setSelectedEvent(null);
+      setDetailPanelOpen(false);
+      setSelectedMilitaryBase(null);
     }
   };
 
@@ -371,6 +426,7 @@ export default function Dashboard() {
     setSelectedEvent(null);
     setDetailPanelOpen(false);
     setSelectedMilitaryBase(null);
+    setSelectedFleetGroup(null);
   };
 
   const toggleLayer = (layer: MapLayerKey) => {
@@ -381,6 +437,9 @@ export default function Dashboard() {
       // of the full unfiltered list.
       if (layer === "militaryBases" && next) {
         setMilitaryBaseFilter("major");
+      }
+      if (layer === "fleetTracker" && next) {
+        setFleetRegionFilter("all");
       }
       return { ...prev, [layer]: next };
     });
@@ -403,9 +462,17 @@ export default function Dashboard() {
     navalVessels: activeLayers.navalVessels ? navalVessels : [],
     wildfires: activeLayers.wildfires ? wildfires : [],
     storms: activeLayers.storms ? storms : [],
+    fleetGroups:
+      activeLayers.fleetTracker
+        ? fleetRegionFilter === "all"
+          ? fleetGroups
+          : fleetGroups.filter((g) => g.id === fleetRegionFilter)
+        : [],
     onSelectConflictZone: setSelectedConflictZone,
     selectedMilitaryBase,
     onSelectMilitaryBase: handleMilitaryBaseSelect,
+    selectedFleetGroup,
+    onSelectFleetGroup: handleFleetGroupSelect,
     onSelectCountry: handleCountrySelect,
     selectedCountryName: selectedCountry?.name ?? null,
     mobileVisible: mobileView === "map",
@@ -417,12 +484,13 @@ export default function Dashboard() {
     ["tradeRoutes", "Trade Routes"],
     ["conflictZones", "Conflict Zones"],
     ["ports", "Ports"],
-    ["navalVessels", "Naval Vessels"],
+    ["navalVessels", "Naval & Tanker Vessels"],
     ["cables", "Submarine Cables"],
     ["pipelines", "Oil & Gas Pipelines"],
     ["militaryBases", "Military Bases"],
     ["wildfires", "Wildfires"],
     ["storms", "Storms"],
+    ["fleetTracker", "US Fleet Tracker (USNI)"],
     ["countries", "Country Borders"],
   ];
   const layerStatusLabel = (key: MapLayerKey): string => {
@@ -434,6 +502,9 @@ export default function Dashboard() {
     }
     if (key === "storms" && activeLayers.storms) {
       return stormsLoading && storms.length === 0 ? "LOADING…" : `ON (${storms.length})`;
+    }
+    if (key === "fleetTracker" && activeLayers.fleetTracker) {
+      return fleetLoading && fleetGroups.length === 0 ? "LOADING…" : `ON (${fleetGroups.length})`;
     }
     return activeLayers[key] ? "ON" : "OFF";
   };
@@ -731,8 +802,17 @@ export default function Dashboard() {
                   )}
                   {activeLayers.navalVessels && (
                     <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                      AIS scan takes ~90s per refresh (every 30 min). Military-flagged
-                      vessels are rare — 0 results on a given scan is expected.
+                      {navalOutage ? (
+                        <span className="text-amber-500">
+                          AIS feed unavailable right now — the live data provider isn&apos;t
+                          streaming (known outage on their end). Retrying automatically.
+                        </span>
+                      ) : (
+                        <>
+                          AIS scan takes ~90s per refresh (every 30 min). Military-flagged and
+                          tanker-flagged vessels are rare — 0 results on a given scan is expected.
+                        </>
+                      )}
                       {navalLastChecked && ` Last checked: ${navalLastChecked}.`}
                     </p>
                   )}
@@ -740,6 +820,46 @@ export default function Dashboard() {
                     <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
                       Covers Atlantic + Eastern/Central Pacific only (NOAA NHC) — not
                       global.
+                    </p>
+                  )}
+                  {activeLayers.fleetTracker && fleetGroups.length > 0 && (
+                    <div className="flex flex-wrap gap-1 px-2 py-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFleetRegionFilter("all");
+                        }}
+                        className={`rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
+                          fleetRegionFilter === "all"
+                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                            : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                        }`}
+                      >
+                        All
+                      </button>
+                      {fleetGroups.map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFleetRegionFilter(g.id);
+                          }}
+                          className={`rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
+                            fleetRegionFilter === g.id
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                          }`}
+                        >
+                          {g.region}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {activeLayers.fleetTracker && (
+                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
+                      Approximate region only (USNI News reports named sea areas, not exact
+                      coordinates) — updated roughly weekly.
+                      {fleetLastChecked && ` Last checked: ${fleetLastChecked}.`}
                     </p>
                   )}
                 </div>
@@ -892,6 +1012,33 @@ export default function Dashboard() {
                       ))}
                     </div>
                   )}
+                  {activeLayers.fleetTracker && fleetGroups.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        onClick={() => setFleetRegionFilter("all")}
+                        className={`min-h-[38px] rounded border px-2 text-center uppercase tracking-wider transition ${
+                          fleetRegionFilter === "all"
+                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                            : "border-slate-700 text-slate-500"
+                        }`}
+                      >
+                        All
+                      </button>
+                      {fleetGroups.map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={() => setFleetRegionFilter(g.id)}
+                          className={`min-h-[38px] rounded border px-2 text-center uppercase tracking-wider transition ${
+                            fleetRegionFilter === g.id
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500"
+                          }`}
+                        >
+                          {g.region}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Legend */}
@@ -926,6 +1073,14 @@ export default function Dashboard() {
             onClose={() => setSelectedMilitaryBase(null)}
           />
 
+          {/* Fleet Tracker Detail Panel — docked to the right edge of the map, scrollable */}
+          <FleetTrackerDetailPanel
+            group={selectedFleetGroup}
+            sourceUrl={fleetSourceUrl}
+            publishedAt={fleetPublishedAt}
+            onClose={() => setSelectedFleetGroup(null)}
+          />
+
           {/* Country Detail Panel — docked to the right edge of the map, scrollable */}
           <CountryDetailPanel
             country={selectedCountry}
@@ -949,6 +1104,12 @@ export default function Dashboard() {
             <MilitaryBaseDetailPanel
               base={selectedMilitaryBase}
               onClose={() => setSelectedMilitaryBase(null)}
+            />
+            <FleetTrackerDetailPanel
+              group={selectedFleetGroup}
+              sourceUrl={fleetSourceUrl}
+              publishedAt={fleetPublishedAt}
+              onClose={() => setSelectedFleetGroup(null)}
             />
             <CountryDetailPanel
               country={selectedCountry}

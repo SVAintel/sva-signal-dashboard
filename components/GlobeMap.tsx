@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import type { FleetGroup } from "./FleetTrackerDetailPanel";
 
 const CATEGORY_COLORS: Record<string, string> = {
   war: "#ef4444",
@@ -41,6 +42,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  fleetTracker: boolean;
   countries: boolean;
 }
 
@@ -104,6 +106,7 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
+  kind: "military" | "tanker";
 }
 
 interface Wildfire {
@@ -183,9 +186,10 @@ interface GlobeMarker {
   color: string;
   size: number;
   label: string;
-  kind: "event" | "militaryBase";
+  kind: "event" | "militaryBase" | "fleetGroup";
   event?: Event;
   base?: MilitaryBaseFeature;
+  fleetGroup?: FleetGroup;
 }
 
 // Popup state shared by event/military-base markers and country clicks —
@@ -193,13 +197,14 @@ interface GlobeMarker {
 // and Expand button, and to keep that card glued to the right screen point.
 interface GlobePopupTarget {
   id: string;
-  kind: "event" | "militaryBase" | "country";
+  kind: "event" | "militaryBase" | "country" | "fleetGroup";
   lat: number;
   lng: number;
   altitude: number;
   event?: Event;
   base?: MilitaryBaseFeature;
   countryName?: string;
+  fleetGroup?: FleetGroup;
 }
 
 interface GlobePath {
@@ -441,6 +446,9 @@ export default function GlobeMap({
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
+  fleetGroups = [],
+  selectedFleetGroup = null,
+  onSelectFleetGroup,
   onSelectCountry,
   selectedCountryName = null,
   mobileVisible = true,
@@ -456,6 +464,9 @@ export default function GlobeMap({
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
   selectedMilitaryBase?: MilitaryBaseFeature | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
+  fleetGroups?: FleetGroup[];
+  selectedFleetGroup?: FleetGroup | null;
+  onSelectFleetGroup?: (group: FleetGroup) => void;
   onSelectCountry?: (name: string) => void;
   selectedCountryName?: string | null;
   mobileVisible?: boolean;
@@ -754,6 +765,8 @@ export default function GlobeMap({
       ? { lat: selectedEvent.location.lat, lng: selectedEvent.location.lng, altitude: FOCUSED_POV_ALTITUDE }
       : selectedMilitaryBase
       ? { lat: selectedMilitaryBase.lat, lng: selectedMilitaryBase.lng, altitude: FOCUSED_POV_ALTITUDE }
+      : selectedFleetGroup
+      ? { lat: selectedFleetGroup.lat, lng: selectedFleetGroup.lng, altitude: FOCUSED_POV_ALTITUDE }
       : selectedCountryName
       ? (() => {
           const feature = countryFeatures.find(
@@ -789,14 +802,14 @@ export default function GlobeMap({
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
     globe.pointOfView(fallback, 900);
     priorPointOfViewRef.current = null;
-  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedCountryName, countryFeatures]);
+  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedCountryName, countryFeatures]);
 
   // Close the marker popup once its "Expand" button hands off to the real
   // detail panel (selectedEvent/selectedMilitaryBase/selectedCountryName
   // becoming set), so it never lingers on screen behind/alongside the panel.
   useEffect(() => {
-    if (selectedEvent || selectedMilitaryBase || selectedCountryName) setPopupTarget(null);
-  }, [selectedEvent?.id, selectedMilitaryBase?.id, selectedCountryName]);
+    if (selectedEvent || selectedMilitaryBase || selectedFleetGroup || selectedCountryName) setPopupTarget(null);
+  }, [selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedCountryName]);
 
   // Keep the popup glued to its marker's projected screen position every
   // frame while open, so it tracks correctly through globe rotation/zoom —
@@ -872,10 +885,10 @@ export default function GlobeMap({
           kind: "naval" as const,
           lat: vessel.lat,
           lng: vessel.lng,
-          color: "#7dd3fc",
+          color: vessel.kind === "tanker" ? "#eab308" : "#7dd3fc",
           radius: 0.18,
           altitude: FLAT_ALTITUDE,
-          label: `⚓ ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
+          label: `${vessel.kind === "tanker" ? "🛢️" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
         }))
       );
     }
@@ -957,8 +970,24 @@ export default function GlobeMap({
       });
     }
 
+    if (activeLayers.fleetTracker) {
+      fleetGroups.forEach((group) => {
+        markers.push({
+          id: `fleet-${group.id}`,
+          lat: group.lat,
+          lng: group.lng,
+          altitude: FLAT_ALTITUDE,
+          color: "#38bdf8",
+          size: 12,
+          label: `🇺🇸⚓ ${group.region}${group.groupName ? ` — ${group.groupName}` : ""}`,
+          kind: "fleetGroup",
+          fleetGroup: group,
+        });
+      });
+    }
+
     return markers;
-  }, [events, activeLayers.militaryBases, layerData?.militaryBases]);
+  }, [events, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups]);
 
   // Kept in sync (below, on every render) so the proximity-click handler
   // effect can read the latest markers without needing to reattach its
@@ -986,6 +1015,7 @@ export default function GlobeMap({
             altitude: marker.altitude,
             event: marker.event,
             base: marker.base,
+            fleetGroup: marker.fleetGroup,
           }
     );
   }, []);
@@ -1429,11 +1459,25 @@ export default function GlobeMap({
                     </div>
                     <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.countryName}</div>
                   </>
+                ) : popupTarget.kind === "fleetGroup" && popupTarget.fleetGroup ? (
+                  <>
+                    <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      US Fleet Tracker{popupTarget.fleetGroup.groupName ? ` • ${popupTarget.fleetGroup.groupName}` : ""}
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
+                      🇺🇸⚓ {popupTarget.fleetGroup.region}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      {popupTarget.fleetGroup.ships.slice(0, 2).join(", ") || "See detail for ship list"}
+                      {popupTarget.fleetGroup.ships.length > 2 ? ` +${popupTarget.fleetGroup.ships.length - 2} more` : ""}
+                    </div>
+                  </>
                 ) : null}
                 <button
                   onClick={() => {
                     if (popupTarget.kind === "event" && popupTarget.event) onSelectEvent(popupTarget.event);
                     else if (popupTarget.kind === "militaryBase" && popupTarget.base) onSelectMilitaryBase?.(popupTarget.base);
+                    else if (popupTarget.kind === "fleetGroup" && popupTarget.fleetGroup) onSelectFleetGroup?.(popupTarget.fleetGroup);
                     else if (popupTarget.kind === "country" && popupTarget.countryName) onSelectCountry?.(popupTarget.countryName);
                     setPopupTarget(null);
                   }}
