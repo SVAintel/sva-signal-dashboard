@@ -3,9 +3,16 @@ import { Event } from "@/lib/types";
 import type { MilitaryBaseData } from "@/components/MilitaryBaseDetailPanel";
 import type { CountryData } from "@/components/CountryDetailPanel";
 import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
+import { getRecentEvents, type EventHistoryRow } from "@/lib/db";
+import { eventsForRegion } from "@/lib/region-match";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
+// How far back to look for live-feed signals to ground country/base chat
+// answers in what's actually happening right now, on top of the static
+// curated context and the model's own general knowledge.
+const LIVE_SIGNAL_WINDOW_DAYS = 14;
+const MAX_LIVE_SIGNALS = 12;
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -17,6 +24,24 @@ interface ChatRequestBody {
   militaryBase?: MilitaryBaseData;
   country?: CountryData;
   messages: ChatMessage[];
+}
+
+// Renders a "what's actually being tracked right now" block from the
+// historical event feed, scoped to a region/country/base by name. Best-effort
+// — getRecentEvents() already swallows DB errors and returns [], so this
+// degrades to an empty string (i.e. rely on curated context + general
+// knowledge) rather than failing the chat request.
+function formatLiveSignals(events: EventHistoryRow[]): string {
+  if (events.length === 0) return "";
+  const lines = events
+    .slice(0, MAX_LIVE_SIGNALS)
+    .map((e) => `- [${e.category.replace(/_/g, " ")}] ${e.title} (${e.source}, first tracked ${e.firstSeenAt})`)
+    .join("\n");
+  return (
+    `Recent live signals tracked by the dashboard (last ${LIVE_SIGNAL_WINDOW_DAYS} days — may be incomplete or ` +
+    `unverified; weigh alongside the curated context above and your own knowledge, and don't treat this list as ` +
+    `exhaustive):\n${lines}\n\n`
+  );
 }
 
 export async function POST(req: Request) {
@@ -42,6 +67,17 @@ export async function POST(req: Request) {
     (!country || !country.name)
   ) {
     return NextResponse.json({ error: "Missing event, military base, or country context." }, { status: 400 });
+  }
+
+  // Ground country/base answers in what's currently being tracked, not just
+  // the static curated context. Skipped for the single-event branch since
+  // that event *is* the live signal already.
+  let liveSignalsBlock = "";
+  const regionName = country?.name || militaryBase?.country;
+  if (!event && regionName) {
+    const recentEvents = await getRecentEvents(LIVE_SIGNAL_WINDOW_DAYS);
+    const matched = eventsForRegion(recentEvents, regionName);
+    liveSignalsBlock = formatLiveSignals(matched);
   }
 
   const systemContext = event
@@ -79,6 +115,7 @@ export async function POST(req: Request) {
       `broader question may need several. Do NOT pad with extra paragraph breaks just to hit a target count, ` +
       `and do NOT shorten or omit substantive details to fit a paragraph.\n\n` +
       ANALYTIC_TRADECRAFT_GUIDANCE +
+      liveSignalsBlock +
       `Military installation context:\n` +
       `- Name: ${militaryBase!.name}\n` +
       `- Branch/Operator: ${militaryBase!.details?.branch || militaryBase!.operator || "Unknown"}\n` +
@@ -103,6 +140,7 @@ export async function POST(req: Request) {
       `several. Do NOT pad with extra paragraph breaks just to hit a target count, and do NOT shorten or omit ` +
       `substantive details to fit a paragraph.\n\n` +
       ANALYTIC_TRADECRAFT_GUIDANCE +
+      liveSignalsBlock +
       `Country context:\n` +
       `- Name: ${country!.name}\n` +
       (country!.details

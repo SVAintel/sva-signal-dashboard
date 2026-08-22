@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRecentEvents, getRecentFleetSnapshots, type EventHistoryRow, type FleetHistoryRow } from "@/lib/db";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
 import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
+import { eventsForRegion, fleetForRegion } from "@/lib/region-match";
 
 // On-demand "what happened here in the last week" brief — the synthesis
 // layer sitting on top of the raw event/fleet history captured by
@@ -12,34 +13,6 @@ export const dynamic = "force-dynamic";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const WINDOW_DAYS = 7;
-
-function normalize(s: string): string {
-  return s.toLowerCase().trim();
-}
-
-// Matches events to a region by simple keyword containment in either
-// direction (event text mentions the region name, or vice versa for short
-// region names like "Iran"). Deliberately loose/textual rather than a strict
-// geo-fence, since named sea regions (e.g. "Red Sea") don't correspond to any
-// single country polygon and events don't carry a region label of their own.
-function matchesRegion(text: string, regionName: string, aliases: string[]): boolean {
-  const t = normalize(text);
-  const candidates = [regionName, ...aliases].map(normalize).filter(Boolean);
-  return candidates.some((c) => c.length > 2 && t.includes(c));
-}
-
-function eventsForRegion(events: EventHistoryRow[], regionName: string, aliases: string[]) {
-  return events.filter((e) => matchesRegion(`${e.title} ${e.description ?? ""}`, regionName, aliases));
-}
-
-function fleetForRegion(fleets: FleetHistoryRow[], regionName: string, aliases: string[]) {
-  const norm = normalize(regionName);
-  return fleets.filter((f) => {
-    const region = normalize(f.region);
-    if (region.includes(norm) || norm.includes(region)) return true;
-    return aliases.some((a) => region.includes(normalize(a)));
-  });
-}
 
 async function generateBrief(
   regionName: string,

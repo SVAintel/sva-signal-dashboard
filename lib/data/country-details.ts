@@ -2285,9 +2285,11 @@ export const COUNTRY_DETAILS: Record<string, CountryDetail> = {
     alliances: ["Major non-NATO ally status with the U.S. (largest recipient of U.S. military aid)", "Abraham Accords (UAE, Bahrain, Morocco, Sudan)"],
     summary:
       "Fighting a multi-front war since Hamas's October 7, 2023 attack — a devastating Gaza campaign, sustained " +
-      "exchanges with Hezbollah in Lebanon (now under a fragile ceasefire), and direct missile exchanges with Iran " +
-      "in 2024 — while facing an ICJ genocide case and deep domestic political polarization over judicial reform " +
-      "and the war's conduct.",
+      "exchanges with Hezbollah in Lebanon, and a full-scale war with Iran that erupted Feb 28, 2026 (\"Operation " +
+      "Epic Fury\"), in which Israel and the US struck Iranian military/nuclear sites and killed Supreme Leader Ali " +
+      "Khamenei. That war saw a contested ceasefire from April 2026 and renewed maritime clashes with Iran through " +
+      "mid-2026; as of August 2026 large strikes have paused but tension remains high — all while Israel faces an " +
+      "ICJ genocide case and deep domestic political polarization over judicial reform and the wars' conduct.",
   },
   Jordan: {
     region: "Middle East",
@@ -2649,19 +2651,26 @@ export const COUNTRY_DETAILS: Record<string, CountryDetail> = {
     capital: "Tehran",
     population: "~90 million",
     governmentType: "Theocratic presidential republic (Supreme Leader holds ultimate authority)",
-    rulingParties: "Supreme Leader Ali Khamenei; President Masoud Pezeshkian (reformist-aligned), in office since July 2024.",
-    gdp: "~$400–450 billion (nominal, heavily sanctioned economy)",
-    majorExports: ["Crude oil & petroleum products (mostly to China, sanctions-evading)", "Petrochemicals", "Carpets & agricultural goods"],
+    rulingParties: "Supreme Leader Mojtaba Khamenei (succeeded his father Ali Khamenei after Ali Khamenei was killed in the Feb 28, 2026 opening US/Israeli strikes); President Masoud Pezeshkian (reformist-aligned), in office since July 2024.",
+    gdp: "~$400–450 billion (nominal, heavily sanctioned economy, further strained by ongoing war)",
+    majorExports: ["Crude oil & petroleum products (mostly to China, sanctions-evading, disrupted by war/blockade)", "Petrochemicals", "Carpets & agricultural goods"],
     topTradePartners: ["China", "United Arab Emirates", "Iraq", "Turkey"],
     militaryBranches: ["Islamic Republic of Iran Army (Artesh)", "Islamic Revolutionary Guard Corps (IRGC)", "IRGC Navy/Aerospace Force"],
-    activePersonnel: "~610,000 (Artesh + IRGC combined)",
+    activePersonnel: "~610,000 (Artesh + IRGC combined; degraded by 2026 war losses)",
     defenseBudget: "~$10–20 billion (officially; asymmetric/proxy spending obscures true totals)",
     alliances: ["'Axis of Resistance' network (Hezbollah, Houthis, Iraqi militias)", "Strategic partnership with Russia and China"],
     summary:
-      "Its regional 'Axis of Resistance' was severely degraded in 2024–2025 — Hezbollah decimated, Assad's Syria " +
-      "collapsed, Hamas battered — and Iran itself traded direct strikes with Israel in 2024–2025, including a major " +
-      "June 2025 12-day war with Israeli and U.S. strikes on its nuclear facilities. Nuclear program status remains a " +
-      "central flashpoint despite the setbacks.",
+      "Iran has been at war with the United States and Israel since February 28, 2026 (\"Operation Epic Fury\"), when " +
+      "coordinated US/Israeli strikes hit Iranian military and nuclear sites and killed Supreme Leader Ali Khamenei " +
+      "and senior IRGC commanders; his son Mojtaba Khamenei succeeded him as Supreme Leader. Iran retaliated with " +
+      "large-scale missile/drone strikes and closed the Strait of Hormuz to US/Israeli-linked shipping, triggering a " +
+      "global oil-market shock. A partial ceasefire (April 7-8, 2026, brokered by Pakistan) never fully held; fighting " +
+      "resumed at sea in June-July after Iranian attacks on commercial vessels. As of August 2026 there have been no " +
+      "major airstrikes inside Iran for several weeks, but the Strait of Hormuz remains an active maritime blockade " +
+      "and confrontation zone (dozens of vessels redirected/disabled, 20+ coalition warships involved), with both " +
+      "sides on high alert and Iran shifting toward proxy/asymmetric tactics. Total casualties across all parties are " +
+      "estimated in the ~9,000-18,000 range. Its regional 'Axis of Resistance' network was already severely degraded " +
+      "in 2024-2025 (Hezbollah decimated, Assad's Syria collapsed, Hamas battered) prior to this war.",
   },
   Kazakhstan: {
     region: "Asia",

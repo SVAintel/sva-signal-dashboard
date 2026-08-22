@@ -62,6 +62,23 @@ export const CONFLICTS: ConflictDefinition[] = [
     sources: ["ACLED", "UCDP"],
   },
   {
+    id: "us-iran-war",
+    name: "Iran-US/Israel War (Operation Epic Fury)",
+    countries: ["Iran"],
+    actors: ["United States Armed Forces", "Israel Defense Forces (IDF)", "Islamic Revolutionary Guard Corps (IRGC)", "Artesh (Iranian Army)"],
+    description:
+      "War that began Feb 28, 2026 with coordinated US/Israeli strikes on Iranian military and nuclear sites, " +
+      "which killed Supreme Leader Ali Khamenei (succeeded by his son Mojtaba Khamenei) and senior IRGC commanders. " +
+      "Iran retaliated with large-scale missile/drone strikes and closed the Strait of Hormuz to US/Israeli-linked " +
+      "shipping. A partial ceasefire (April 2026, brokered by Pakistan) never fully held; fighting resumed at sea " +
+      "in June-July 2026 after Iranian attacks on commercial vessels. As of August 2026, large-scale airstrikes " +
+      "have paused for several weeks but a US-led naval blockade/confrontation continues in the Strait of Hormuz.",
+    casualties: "Est. 9,000-18,000+ killed across all parties (military and civilian); millions displaced regionally",
+    startYear: 2026,
+    intensity: "high",
+    sources: ["ISW", "ACLED", "Britannica", "GlobalSecurity.org"],
+  },
+  {
     id: "sudan-civil-war",
     name: "Sudan Civil War",
     countries: ["Sudan"],
