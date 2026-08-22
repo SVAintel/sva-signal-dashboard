@@ -198,7 +198,10 @@ const PORTS = [
 ];
 
 // Port marker: small blue-tinted diamond, static like military bases (fixed
-// infrastructure, not a live-tracked asset).
+// infrastructure, not a live-tracked asset). Curated major/strategic ports
+// (chokepoints, top container/cargo hubs) use a brighter gold marker so they
+// stand out from the hundreds of minor WPI entries, mirroring the
+// militaryBaseIcon/majorMilitaryBaseIcon distinction above.
 const portIcon = new L.DivIcon({
   className: "",
   html: `<div style="position:relative;width:10px;height:10px;">
@@ -207,6 +210,16 @@ const portIcon = new L.DivIcon({
   </div>`,
   iconSize: [10, 10],
   iconAnchor: [5, 5],
+});
+
+const majorPortIcon = new L.DivIcon({
+  className: "",
+  html: `<div style="position:relative;width:13px;height:13px;">
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#d4b36a;"></div>
+    <div style="position:relative;width:13px;height:13px;border-radius:50%;background:#d4b36a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(212,179,106,0.9);"></div>
+  </div>`,
+  iconSize: [13, 13],
+  iconAnchor: [6, 6],
 });
 
 interface MapLayers {
@@ -292,6 +305,7 @@ interface PortFeature {
   lng: number;
   country: string;
   size: string;
+  isMajor: boolean;
   details?: PortDetail;
 }
 
@@ -956,7 +970,7 @@ export default function WorldMap({
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
   const portsToRender: PortFeature[] = layerData?.ports?.length
     ? layerData.ports
-    : PORTS.map((p) => ({ ...p, displayName: p.name, country: "N/A", size: "Unknown" }));
+    : PORTS.map((p) => ({ ...p, displayName: p.name, country: "N/A", size: "Unknown", isMajor: true }));
   const [countryFeatures, setCountryFeatures] = useState<CountryFeature[]>([]);
   // Lazy-load the country borders GeoJSON only once the layer is toggled on
   // (it's ~180 features and not needed unless the user asks for it).
@@ -1127,7 +1141,7 @@ export default function WorldMap({
           <Marker
             key={port.name}
             position={[port.lat, port.lng]}
-            icon={portIcon}
+            icon={port.isMajor ? majorPortIcon : portIcon}
             ref={(m) => {
               if (m) portMarkerRefs.current.set(port.name, m);
               else portMarkerRefs.current.delete(port.name);
@@ -1140,7 +1154,7 @@ export default function WorldMap({
             <Popup className="tactical-popup">
               <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
                 <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
-                  Seaport{port.details?.chokepoint ? " • Chokepoint" : ""}
+                  Seaport{port.isMajor ? " • Major" : ""}{port.details?.chokepoint ? " • Chokepoint" : ""}
                 </div>
                 <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>
                   ⚓ {port.displayName}

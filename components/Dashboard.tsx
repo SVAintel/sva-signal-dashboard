@@ -120,6 +120,7 @@ export default function Dashboard() {
   const [selectedPort, setSelectedPort] = useState<PortData | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
+  const [portFilter, setPortFilter] = useState<"all" | "major" | "minor">("major");
   const [fleetRegionFilter, setFleetRegionFilter] = useState<string>("all");
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [lastFetchError, setLastFetchError] = useState<string>("");
@@ -454,6 +455,9 @@ export default function Dashboard() {
       if (layer === "militaryBases" && next) {
         setMilitaryBaseFilter("major");
       }
+      if (layer === "ports" && next) {
+        setPortFilter("major");
+      }
       if (layer === "fleetTracker" && next) {
         setFleetRegionFilter("all");
       }
@@ -467,12 +471,19 @@ export default function Dashboard() {
     onSelectEvent: handleEventSelect,
     activeLayers,
     layerData:
-      layerData && militaryBaseFilter !== "all"
+      layerData && (militaryBaseFilter !== "all" || portFilter !== "all")
         ? {
             ...layerData,
-            militaryBases: layerData.militaryBases.filter((b) =>
-              militaryBaseFilter === "major" ? b.isMajor : !b.isMajor
-            ),
+            militaryBases:
+              militaryBaseFilter === "all"
+                ? layerData.militaryBases
+                : layerData.militaryBases.filter((b) =>
+                    militaryBaseFilter === "major" ? b.isMajor : !b.isMajor
+                  ),
+            ports:
+              portFilter === "all"
+                ? layerData.ports
+                : layerData.ports.filter((p) => (portFilter === "major" ? p.isMajor : !p.isMajor)),
           }
         : layerData,
     navalVessels: activeLayers.navalVessels ? navalVessels : [],
@@ -818,6 +829,32 @@ export default function Dashboard() {
                       ))}
                     </div>
                   )}
+                  {activeLayers.ports && (
+                    <div className="flex items-center gap-1 px-2 py-1">
+                      {(
+                        [
+                          ["all", "All"],
+                          ["major", "Major"],
+                          ["minor", "Minor"],
+                        ] as [typeof portFilter, string][]
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPortFilter(value);
+                          }}
+                          className={`flex-1 rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
+                            portFilter === value
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {activeLayers.navalVessels && (
                     <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
                       {navalOutage ? (
@@ -1021,6 +1058,29 @@ export default function Dashboard() {
                           onClick={() => setMilitaryBaseFilter(value)}
                           className={`min-h-[38px] flex-1 rounded border text-center uppercase tracking-wider transition ${
                             militaryBaseFilter === value
+                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
+                              : "border-slate-700 text-slate-500"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {activeLayers.ports && (
+                    <div className="flex items-center gap-1.5">
+                      {(
+                        [
+                          ["all", "All"],
+                          ["major", "Major"],
+                          ["minor", "Minor"],
+                        ] as [typeof portFilter, string][]
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={() => setPortFilter(value)}
+                          className={`min-h-[38px] flex-1 rounded border text-center uppercase tracking-wider transition ${
+                            portFilter === value
                               ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
                               : "border-slate-700 text-slate-500"
                           }`}

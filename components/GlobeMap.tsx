@@ -166,6 +166,7 @@ interface PortFeature {
   lng: number;
   country: string;
   size: string;
+  isMajor: boolean;
   details?: PortDetail;
 }
 
@@ -417,12 +418,12 @@ const FALLBACK_CONFLICT_ZONES: ConflictZoneData[] = [
 ];
 
 const PORTS = [
-  { name: "Rotterdam", displayName: "Rotterdam", country: "Netherlands", lat: 51.95, lng: 4.13, size: "Major" },
-  { name: "Singapore", displayName: "Singapore", country: "Singapore", lat: 1.26, lng: 103.84, size: "Major" },
-  { name: "Shanghai", displayName: "Shanghai", country: "China", lat: 31.23, lng: 121.49, size: "Major" },
-  { name: "Jebel Ali", displayName: "Jebel Ali", country: "UAE", lat: 25.01, lng: 55.06, size: "Major" },
-  { name: "Los Angeles", displayName: "Los Angeles", country: "United States", lat: 33.74, lng: -118.27, size: "Major" },
-  { name: "Panama", displayName: "Panama", country: "Panama", lat: 8.95, lng: -79.57, size: "Strategic" },
+  { name: "Rotterdam", displayName: "Rotterdam", country: "Netherlands", lat: 51.95, lng: 4.13, size: "Major", isMajor: true },
+  { name: "Singapore", displayName: "Singapore", country: "Singapore", lat: 1.26, lng: 103.84, size: "Major", isMajor: true },
+  { name: "Shanghai", displayName: "Shanghai", country: "China", lat: 31.23, lng: 121.49, size: "Major", isMajor: true },
+  { name: "Jebel Ali", displayName: "Jebel Ali", country: "UAE", lat: 25.01, lng: 55.06, size: "Major", isMajor: true },
+  { name: "Los Angeles", displayName: "Los Angeles", country: "United States", lat: 33.74, lng: -118.27, size: "Major", isMajor: true },
+  { name: "Panama", displayName: "Panama", country: "Panama", lat: 8.95, lng: -79.57, size: "Strategic", isMajor: true },
 ];
 
 const intensityColor = (intensity: ConflictZoneData["intensity"]) =>
@@ -995,9 +996,9 @@ export default function GlobeMap({
           lat: port.lat,
           lng: port.lng,
           altitude: FLAT_ALTITUDE,
-          color: "#93c5fd",
-          size: 10,
-          label: `⚓ ${port.displayName}${port.country ? ` (${port.country})` : ""}`,
+          color: port.isMajor ? "#d4b36a" : "#93c5fd",
+          size: port.isMajor ? 13 : 9,
+          label: `⚓ ${port.displayName}${port.country ? ` (${port.country})` : ""}${port.isMajor ? " ★" : ""}`,
           kind: "port",
           port,
         });
@@ -1481,7 +1482,7 @@ export default function GlobeMap({
                 ) : popupTarget.kind === "port" && popupTarget.port ? (
                   <>
                     <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
-                      Seaport{popupTarget.port.details?.chokepoint ? " • Chokepoint" : ""}
+                      Seaport{popupTarget.port.isMajor ? " • Major" : ""}{popupTarget.port.details?.chokepoint ? " • Chokepoint" : ""}
                     </div>
                     <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
                       ⚓ {popupTarget.port.displayName}

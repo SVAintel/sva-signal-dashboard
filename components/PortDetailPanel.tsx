@@ -11,6 +11,7 @@ export interface PortData {
   lng: number;
   country: string;
   size: string;
+  isMajor: boolean;
   details?: PortDetail;
 }
 
@@ -84,7 +85,7 @@ export default function PortDetailPanel({ port, onClose }: PortDetailPanelProps)
   if (!port) return null;
 
   const details = port.details;
-  const color = "#93c5fd";
+  const color = port.isMajor ? "#d4b36a" : "#93c5fd";
 
   return (
     <div className="absolute inset-y-0 right-0 z-[1200] flex w-full max-w-full sm:max-w-[420px] pointer-events-none">
@@ -94,7 +95,7 @@ export default function PortDetailPanel({ port, onClose }: PortDetailPanelProps)
             <div className="mb-2 flex items-center gap-2">
               <div className="h-3 w-3 rounded-full" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
               <span className="text-xs font-bold uppercase text-[#d4b36a]">
-                Seaport{port.size !== "Unknown" ? ` • ${port.size}` : ""}
+                Seaport{port.size !== "Unknown" ? ` • ${port.size}` : ""}{port.isMajor ? " • Major" : ""}
               </span>
             </div>
             <h1 className="text-lg font-bold leading-snug text-slate-100">⚓ {port.displayName}</h1>

@@ -39,6 +39,7 @@ interface PortFeature {
   lat: number;
   lng: number;
   size: string;
+  isMajor: boolean;
   details?: PortDetail;
 }
 
@@ -180,6 +181,11 @@ function parsePorts(geojson: any): PortFeature[] {
         lat: p.lat,
         lng: p.lng,
         size: p.size,
+        // Only the hand-curated ports (chokepoints, top container/cargo hubs)
+        // count as "major" — mirrors the isMajor = Boolean(details) pattern
+        // used for military bases, so the map layer can offer the same
+        // All/Major/Minor filter UX.
+        isMajor: Boolean(details),
         details,
       };
     });
