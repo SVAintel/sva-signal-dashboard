@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CONFLICTS } from "@/lib/conflict-data";
+import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.5-flash-lite";
@@ -80,6 +81,7 @@ export async function POST(req: Request) {
     `the length and complexity of the answer — a quick factual question may only need one short paragraph, ` +
     `while a broad situational brief may need several. Do NOT pad with extra paragraph breaks just to hit a ` +
     `target count, and do NOT shorten or omit substantive details to fit a paragraph.\n\n` +
+    ANALYTIC_TRADECRAFT_GUIDANCE +
     `Reference: ongoing armed conflicts —\n${conflictSummary}\n\n` +
     `Live signal feed snapshot (${events.length} of the dashboard's active signals):\n${feedSummary || "No active signals currently loaded."}\n\n` +
     `Conversation so far:\n${transcript}\n\n` +

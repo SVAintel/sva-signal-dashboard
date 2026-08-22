@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecentEvents, getRecentFleetSnapshots, type EventHistoryRow, type FleetHistoryRow } from "@/lib/db";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
+import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
 
 // On-demand "what happened here in the last week" brief — the synthesis
 // layer sitting on top of the raw event/fleet history captured by
@@ -68,6 +69,7 @@ async function generateBrief(
 
   const prompt = `You are a geopolitical risk analyst producing a concise, evidence-based weekly brief for a client-facing intelligence dashboard.
 
+${ANALYTIC_TRADECRAFT_GUIDANCE}
 Region: ${regionName}
 Time window: last ${WINDOW_DAYS} days
 

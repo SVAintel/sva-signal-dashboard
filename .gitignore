@@ -12,6 +12,10 @@ build
 # Naval AIS disk cache (local dev only)
 .naval-cache.json
 
+# Fleet tracker / market health disk caches (local dev only)
+.fleet-tracker-cache.json
+.market-health-cache.json
+
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
 .env*
