@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Event } from "@/lib/types";
 import type { MilitaryBaseData } from "@/components/MilitaryBaseDetailPanel";
 import type { CountryData } from "@/components/CountryDetailPanel";
+import type { PortData } from "@/components/PortDetailPanel";
 import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
 import { getRecentEvents, type EventHistoryRow } from "@/lib/db";
 import { eventsForRegion } from "@/lib/region-match";
@@ -23,6 +24,7 @@ interface ChatRequestBody {
   event?: Event;
   militaryBase?: MilitaryBaseData;
   country?: CountryData;
+  port?: PortData;
   messages: ChatMessage[];
 }
 
@@ -59,21 +61,23 @@ export async function POST(req: Request) {
   const event = body?.event;
   const militaryBase = body?.militaryBase;
   const country = body?.country;
+  const port = body?.port;
   const messages = Array.isArray(body?.messages) ? body.messages : [];
 
   if (
     (!event || !event.title || !event.category || !event.description) &&
     (!militaryBase || !militaryBase.name) &&
-    (!country || !country.name)
+    (!country || !country.name) &&
+    (!port || !port.name)
   ) {
-    return NextResponse.json({ error: "Missing event, military base, or country context." }, { status: 400 });
+    return NextResponse.json({ error: "Missing event, military base, country, or port context." }, { status: 400 });
   }
 
-  // Ground country/base answers in what's currently being tracked, not just
-  // the static curated context. Skipped for the single-event branch since
-  // that event *is* the live signal already.
+  // Ground country/base/port answers in what's currently being tracked, not
+  // just the static curated context. Skipped for the single-event branch
+  // since that event *is* the live signal already.
   let liveSignalsBlock = "";
-  const regionName = country?.name || militaryBase?.country;
+  const regionName = country?.name || militaryBase?.country || port?.country;
   if (!event && regionName) {
     const recentEvents = await getRecentEvents(LIVE_SIGNAL_WINDOW_DAYS);
     const matched = eventsForRegion(recentEvents, regionName);
@@ -127,6 +131,32 @@ export async function POST(req: Request) {
           `- Major Units: ${militaryBase!.details.majorUnits.join("; ")}\n` +
           `- Mission Set: ${militaryBase!.details.missions.join("; ")}\n`
         : `- Detailed unit/mission data is not curated for this installation; rely on general knowledge.\n`)
+    : port
+    ? `You are an intelligence analyst assistant for Sovereign Veil Analytics. ` +
+      `Answer using the seaport context below PLUS your own general knowledge of global shipping, trade flows, and ` +
+      `maritime chokepoints — do not ask the user to supply information themselves. Figures given are ` +
+      `public/unclassified approximations, not an authoritative maritime traffic source; note that if relevant. ` +
+      `If something falls outside both the given context and your knowledge, briefly note that in passing rather ` +
+      `than blocking on it. Keep responses practical and analyst-style, and prioritize specific, concrete ` +
+      `details — cite named chokepoints, trade lanes, cargo types, and figures rather than vague generalities. ` +
+      `Formatting: separate distinct topics/ideas into their own paragraphs with a blank line between them so the ` +
+      `answer is easy to scan. Let the number of paragraphs vary naturally with the length and complexity of the ` +
+      `answer — a quick factual question may only need one short paragraph, while a broader question may need ` +
+      `several. Do NOT pad with extra paragraph breaks just to hit a target count, and do NOT shorten or omit ` +
+      `substantive details to fit a paragraph.\n\n` +
+      ANALYTIC_TRADECRAFT_GUIDANCE +
+      liveSignalsBlock +
+      `Seaport context:\n` +
+      `- Name: ${port!.displayName || port!.name}\n` +
+      `- Country: ${port!.country || "N/A"}\n` +
+      `- Harbor size: ${port!.size}\n` +
+      `- Location: ${port!.lat.toFixed(2)}, ${port!.lng.toFixed(2)}\n` +
+      (port!.details
+        ? `- Chokepoint: ${port!.details.chokepoint || "None"}\n` +
+          `- Primary cargo: ${port!.details.primaryCargo.join("; ")}\n` +
+          `- Annual throughput: ${port!.details.annualThroughput}\n` +
+          `- Summary: ${port!.details.strategicNotes}\n`
+        : `- Detailed cargo/throughput/chokepoint data is not curated for this port; rely on general knowledge.\n`)
     : `You are an intelligence analyst assistant for Sovereign Veil Analytics. ` +
       `Answer using the country context below PLUS your own general knowledge of its politics, economy, military, ` +
       `and regional relationships — do not ask the user to supply information themselves. Figures given are ` +
@@ -180,7 +210,7 @@ export async function POST(req: Request) {
                 {
                   text:
                     `${systemContext}\n\nConversation so far:\n` +
-                    `${chatTranscript || `User: Provide a brief initial assessment of this ${event ? "event" : militaryBase ? "installation" : "country"}.`}\n\n` +
+                    `${chatTranscript || `User: Provide a brief initial assessment of this ${event ? "event" : militaryBase ? "installation" : port ? "port" : "country"}.`}\n\n` +
                     `Now provide the assistant response.`,
                 },
               ],

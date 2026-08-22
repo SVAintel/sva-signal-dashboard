@@ -1,12 +1,13 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import type { PortDetail } from "@/lib/data/port-details";
 import type { FleetGroup } from "./FleetTrackerDetailPanel";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -196,6 +197,18 @@ const PORTS = [
   { name: "Panama", lat: 8.95, lng: -79.57 },
 ];
 
+// Port marker: small blue-tinted diamond, static like military bases (fixed
+// infrastructure, not a live-tracked asset).
+const portIcon = new L.DivIcon({
+  className: "",
+  html: `<div style="position:relative;width:10px;height:10px;">
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#93c5fd;"></div>
+    <div style="position:relative;width:10px;height:10px;border-radius:50%;background:#93c5fd;border:1.5px solid rgba(255,255,255,0.8);box-shadow:0 0 6px rgba(147,197,253,0.9);"></div>
+  </div>`,
+  iconSize: [10, 10],
+  iconAnchor: [5, 5],
+});
+
 interface MapLayers {
   tradeRoutes: boolean;
   conflictZones: boolean;
@@ -272,6 +285,16 @@ interface MilitaryBaseFeature {
   details?: MilitaryBaseDetail;
 }
 
+interface PortFeature {
+  name: string;
+  displayName: string;
+  lat: number;
+  lng: number;
+  country: string;
+  size: string;
+  details?: PortDetail;
+}
+
 interface CountryFeature {
   type: "Feature";
   properties?: { ISO_A2?: string; ADMIN?: string; NAME?: string; [key: string]: unknown };
@@ -281,7 +304,7 @@ interface CountryFeature {
 interface MapLayerData {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneOutput[];
-  ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+  ports: PortFeature[];
   cables: CableFeature[];
   pipelines: PipelineFeature[];
   militaryBases: MilitaryBaseFeature[];
@@ -811,6 +834,28 @@ function MapFleetGroupFocuser({ group }: { group: FleetGroup | null }) {
   return null;
 }
 
+// Flies the map to a selected port and zooms in, mirroring MapMilitaryBaseFocuser.
+function MapPortFocuser({ port }: { port: PortFeature | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (port) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const targetZoom = Math.max(map.getZoom(), 6);
+      map.flyTo([port.lat, port.lng], targetZoom, { duration: 0.9 });
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [port?.name, map]);
+
+  return null;
+}
+
 // Picks the bounds of a country's largest contiguous landmass, ignoring
 // smaller disjoint parts (e.g. France's MultiPolygon includes French Guiana,
 // Réunion, Guadeloupe, etc. — fitting the full bounding box would center the
@@ -884,6 +929,8 @@ export default function WorldMap({
   onSelectCountry,
   selectedCountryName = null,
   mobileVisible = true,
+  selectedPort = null,
+  onSelectPort,
 }: {
   events: Event[];
   selectedEvent: Event | null;
@@ -902,10 +949,14 @@ export default function WorldMap({
   onSelectCountry?: (name: string) => void;
   selectedCountryName?: string | null;
   mobileVisible?: boolean;
+  selectedPort?: PortFeature | null;
+  onSelectPort?: (port: PortFeature) => void;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
-  const portsToRender = layerData?.ports?.length ? layerData.ports : PORTS.map((p) => ({ ...p, country: "N/A", size: "Unknown" }));
+  const portsToRender: PortFeature[] = layerData?.ports?.length
+    ? layerData.ports
+    : PORTS.map((p) => ({ ...p, displayName: p.name, country: "N/A", size: "Unknown" }));
   const [countryFeatures, setCountryFeatures] = useState<CountryFeature[]>([]);
   // Lazy-load the country borders GeoJSON only once the layer is toggled on
   // (it's ~180 features and not needed unless the user asks for it).
@@ -934,6 +985,8 @@ export default function WorldMap({
   const baseMarkerRefs = useRef(new Map<string, L.Marker>());
   // Same purpose again, but for fleet-tracker group markers.
   const fleetMarkerRefs = useRef(new Map<string, L.Marker>());
+  // Same purpose again, but for port markers.
+  const portMarkerRefs = useRef(new Map<string, L.Marker>());
   // Same purpose again, but for country border GeoJSON layers.
   const countryLayerRefs = useRef(new Map<string, L.GeoJSON>());
   // Look up the selected country's GeoJSON feature (for MapCountryFocuser to
@@ -960,6 +1013,7 @@ export default function WorldMap({
       <MapEventFocuser event={selectedEvent} />
       <MapMilitaryBaseFocuser base={selectedMilitaryBase} />
       <MapFleetGroupFocuser group={selectedFleetGroup} />
+      <MapPortFocuser port={selectedPort} />
       <MapCountryFocuser feature={selectedCountryFeature} />
       <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
       <TileLayer
@@ -1070,14 +1124,55 @@ export default function WorldMap({
 
       {activeLayers.ports &&
         portsToRender.map((port) => (
-          <CircleMarker
+          <Marker
             key={port.name}
-            center={[port.lat, port.lng]}
-            radius={5}
-            pathOptions={{ color: "#93c5fd", fillColor: "#93c5fd", fillOpacity: 0.85, weight: 1 }}
+            position={[port.lat, port.lng]}
+            icon={portIcon}
+            ref={(m) => {
+              if (m) portMarkerRefs.current.set(port.name, m);
+              else portMarkerRefs.current.delete(port.name);
+            }}
+            eventHandlers={{
+              click: (e) => e.target.setZIndexOffset(1000),
+              popupclose: (e) => e.target.setZIndexOffset(0),
+            }}
           >
-            <Tooltip>{`Port: ${port.name}${port.country ? ` (${port.country})` : ""}`}</Tooltip>
-          </CircleMarker>
+            <Popup className="tactical-popup">
+              <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+                <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                  Seaport{port.details?.chokepoint ? " • Chokepoint" : ""}
+                </div>
+                <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>
+                  ⚓ {port.displayName}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "11px" }}>
+                  {port.country || "N/A"} — {port.size}
+                </div>
+                <button
+                  onClick={() => {
+                    portMarkerRefs.current.get(port.name)?.closePopup();
+                    onSelectPort?.(port);
+                  }}
+                  style={{
+                    marginTop: "8px",
+                    width: "100%",
+                    border: "1px solid #3a3a3a",
+                    background: "#1e1e1e",
+                    color: "#d4b36a",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Expand
+                </button>
+              </div>
+            </Popup>
+          </Marker>
         ))}
 
       {activeLayers.navalVessels &&

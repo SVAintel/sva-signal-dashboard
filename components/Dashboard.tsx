@@ -12,6 +12,7 @@ import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailP
 import MilitaryBaseDetailPanel, { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
 import FleetTrackerDetailPanel, { FleetGroup } from "./FleetTrackerDetailPanel";
 import CountryDetailPanel, { CountryData } from "./CountryDetailPanel";
+import PortDetailPanel, { PortData } from "./PortDetailPanel";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
 import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
@@ -58,7 +59,7 @@ type MapLayerKey =
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneData[];
-  ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+  ports: PortData[];
   cables: Array<{ id: string; name: string; paths: [number, number][][] }>;
   pipelines: Array<{ id: string; name: string; substance: "oil" | "gas"; paths: [number, number][][] }>;
   militaryBases: MilitaryBaseData[];
@@ -116,6 +117,7 @@ export default function Dashboard() {
   const [selectedMilitaryBase, setSelectedMilitaryBase] = useState<MilitaryBaseData | null>(null);
   const [selectedFleetGroup, setSelectedFleetGroup] = useState<FleetGroup | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<CountryData | null>(null);
+  const [selectedPort, setSelectedPort] = useState<PortData | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
   const [fleetRegionFilter, setFleetRegionFilter] = useState<string>("all");
@@ -395,6 +397,7 @@ export default function Dashboard() {
     if (event) {
       setSelectedMilitaryBase(null);
       setSelectedFleetGroup(null);
+      setSelectedPort(null);
     }
   };
 
@@ -409,6 +412,7 @@ export default function Dashboard() {
       setSelectedEvent(null);
       setDetailPanelOpen(false);
       setSelectedFleetGroup(null);
+      setSelectedPort(null);
     }
   };
 
@@ -418,6 +422,17 @@ export default function Dashboard() {
       setSelectedEvent(null);
       setDetailPanelOpen(false);
       setSelectedMilitaryBase(null);
+      setSelectedPort(null);
+    }
+  };
+
+  const handlePortSelect = (port: PortData | null) => {
+    setSelectedPort(port);
+    if (port) {
+      setSelectedEvent(null);
+      setDetailPanelOpen(false);
+      setSelectedMilitaryBase(null);
+      setSelectedFleetGroup(null);
     }
   };
 
@@ -427,6 +442,7 @@ export default function Dashboard() {
     setDetailPanelOpen(false);
     setSelectedMilitaryBase(null);
     setSelectedFleetGroup(null);
+    setSelectedPort(null);
   };
 
   const toggleLayer = (layer: MapLayerKey) => {
@@ -476,6 +492,8 @@ export default function Dashboard() {
     onSelectCountry: handleCountrySelect,
     selectedCountryName: selectedCountry?.name ?? null,
     mobileVisible: mobileView === "map",
+    selectedPort,
+    onSelectPort: handlePortSelect,
   };
 
   // Shared layer-toggle definitions used by both the desktop dropdown and the
@@ -1086,6 +1104,12 @@ export default function Dashboard() {
             country={selectedCountry}
             onClose={() => setSelectedCountry(null)}
           />
+
+          {/* Port Detail Panel — docked to the right edge of the map, scrollable */}
+          <PortDetailPanel
+            port={selectedPort}
+            onClose={() => setSelectedPort(null)}
+          />
         </div>
 
         {/* Mobile-only: when the user is on the "Signals & Panels" tab (map is
@@ -1114,6 +1138,10 @@ export default function Dashboard() {
             <CountryDetailPanel
               country={selectedCountry}
               onClose={() => setSelectedCountry(null)}
+            />
+            <PortDetailPanel
+              port={selectedPort}
+              onClose={() => setSelectedPort(null)}
             />
           </div>
         )}

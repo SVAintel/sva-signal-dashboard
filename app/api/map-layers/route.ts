@@ -4,6 +4,7 @@ import cablesData from "@/lib/data/cables.json";
 import pipelinesData from "@/lib/data/pipelines.json";
 import militaryBasesData from "@/lib/data/military-bases.json";
 import { MILITARY_BASE_DETAILS, type MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import { PORT_DETAILS, type PortDetail } from "@/lib/data/port-details";
 
 // Underlying datasets already carry long revalidate windows (6h/12h/7d) below.
 // This route has no dynamic API usage of its own though, so without
@@ -33,10 +34,12 @@ interface RouteFeature {
 
 interface PortFeature {
   name: string;
+  displayName: string;
   country: string;
   lat: number;
   lng: number;
   size: string;
+  details?: PortDetail;
 }
 
 interface CableFeature {
@@ -121,6 +124,29 @@ function parseShippingRoutes(geojson: any): RouteFeature[] {
   return routes.slice(0, 260);
 }
 
+// WPI's HARBORSIZE field uses single-letter codes (L/M/S/V), not the
+// "Large"/"Medium"/"Small" words the size-ranking logic below previously
+// compared against — that mismatch meant every port scored 0 and the
+// "top 220 by size" slice was really just the first 220 in file order,
+// silently dropping major ports like Singapore/Jebel Ali in favor of
+// whatever tiny harbor happened to be listed first.
+const HARBOR_SIZE_LABELS: Record<string, string> = {
+  L: "Large",
+  M: "Medium",
+  S: "Small",
+  V: "Very Small",
+};
+
+// Facility names in the WPI feed are UPPERCASE and often obscure sub-harbor
+// names (e.g. "KEPPEL - (EAST SINGAPORE)", "MINA JABAL ALI") rather than the
+// familiar city name. Title-case as a readable fallback; curated entries in
+// PORT_DETAILS override this with a friendlier `displayName`.
+function titleCase(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function parsePorts(geojson: any): PortFeature[] {
   const features = Array.isArray(geojson?.features) ? geojson.features : [];
   const scored = features
@@ -133,25 +159,30 @@ function parsePorts(geojson: any): PortFeature[] {
       const lng = Number(coords[0]);
       if (isNaN(lat) || isNaN(lng)) return null;
 
-      const size = String(p.HARBORSIZE || "").trim() || "Unknown";
+      const sizeCode = String(p.HARBORSIZE || "").trim().toUpperCase();
+      const size = HARBOR_SIZE_LABELS[sizeCode] || "Unknown";
       const name = String(p.PORT_NAME || "").trim() || "Unnamed Port";
       const country = String(p.COUNTRY || "").trim() || "Unknown";
 
-      const sizeScore =
-        size === "Large"
-          ? 3
-          : size === "Medium"
-            ? 2
-            : size === "Small"
-              ? 1
-              : 0;
+      const sizeScore = sizeCode === "L" ? 3 : sizeCode === "M" ? 2 : sizeCode === "S" ? 1 : 0;
 
       return { name, country, lat, lng, size, sizeScore };
     })
     .filter((x: any) => !!x)
     .sort((a: any, b: any) => b.sizeScore - a.sizeScore)
     .slice(0, 220)
-    .map((p: any) => ({ name: p.name, country: p.country, lat: p.lat, lng: p.lng, size: p.size }));
+    .map((p: any) => {
+      const details = PORT_DETAILS[p.name];
+      return {
+        name: p.name,
+        displayName: details?.displayName || titleCase(p.name),
+        country: p.country,
+        lat: p.lat,
+        lng: p.lng,
+        size: p.size,
+        details,
+      };
+    });
 
   return scored;
 }

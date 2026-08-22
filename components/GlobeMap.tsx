@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
+import type { PortDetail } from "@/lib/data/port-details";
 import type { FleetGroup } from "./FleetTrackerDetailPanel";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -158,10 +159,20 @@ interface MilitaryBaseFeature {
   details?: MilitaryBaseDetail;
 }
 
+interface PortFeature {
+  name: string;
+  displayName: string;
+  lat: number;
+  lng: number;
+  country: string;
+  size: string;
+  details?: PortDetail;
+}
+
 interface MapLayerData {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneData[];
-  ports: Array<{ name: string; country: string; lat: number; lng: number; size: string }>;
+  ports: PortFeature[];
   cables: CableFeature[];
   pipelines: PipelineFeature[];
   militaryBases: MilitaryBaseFeature[];
@@ -169,7 +180,7 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "port" | "naval" | "wildfire" | "storm";
+  kind: "naval" | "wildfire" | "storm";
   lat: number;
   lng: number;
   color: string;
@@ -186,10 +197,11 @@ interface GlobeMarker {
   color: string;
   size: number;
   label: string;
-  kind: "event" | "militaryBase" | "fleetGroup";
+  kind: "event" | "militaryBase" | "fleetGroup" | "port";
   event?: Event;
   base?: MilitaryBaseFeature;
   fleetGroup?: FleetGroup;
+  port?: PortFeature;
 }
 
 // Popup state shared by event/military-base markers and country clicks —
@@ -197,7 +209,7 @@ interface GlobeMarker {
 // and Expand button, and to keep that card glued to the right screen point.
 interface GlobePopupTarget {
   id: string;
-  kind: "event" | "militaryBase" | "country" | "fleetGroup";
+  kind: "event" | "militaryBase" | "country" | "fleetGroup" | "port";
   lat: number;
   lng: number;
   altitude: number;
@@ -205,6 +217,7 @@ interface GlobePopupTarget {
   base?: MilitaryBaseFeature;
   countryName?: string;
   fleetGroup?: FleetGroup;
+  port?: PortFeature;
 }
 
 interface GlobePath {
@@ -404,12 +417,12 @@ const FALLBACK_CONFLICT_ZONES: ConflictZoneData[] = [
 ];
 
 const PORTS = [
-  { name: "Rotterdam", country: "Netherlands", lat: 51.95, lng: 4.13, size: "Major" },
-  { name: "Singapore", country: "Singapore", lat: 1.26, lng: 103.84, size: "Major" },
-  { name: "Shanghai", country: "China", lat: 31.23, lng: 121.49, size: "Major" },
-  { name: "Jebel Ali", country: "UAE", lat: 25.01, lng: 55.06, size: "Major" },
-  { name: "Los Angeles", country: "United States", lat: 33.74, lng: -118.27, size: "Major" },
-  { name: "Panama", country: "Panama", lat: 8.95, lng: -79.57, size: "Strategic" },
+  { name: "Rotterdam", displayName: "Rotterdam", country: "Netherlands", lat: 51.95, lng: 4.13, size: "Major" },
+  { name: "Singapore", displayName: "Singapore", country: "Singapore", lat: 1.26, lng: 103.84, size: "Major" },
+  { name: "Shanghai", displayName: "Shanghai", country: "China", lat: 31.23, lng: 121.49, size: "Major" },
+  { name: "Jebel Ali", displayName: "Jebel Ali", country: "UAE", lat: 25.01, lng: 55.06, size: "Major" },
+  { name: "Los Angeles", displayName: "Los Angeles", country: "United States", lat: 33.74, lng: -118.27, size: "Major" },
+  { name: "Panama", displayName: "Panama", country: "Panama", lat: 8.95, lng: -79.57, size: "Strategic" },
 ];
 
 const intensityColor = (intensity: ConflictZoneData["intensity"]) =>
@@ -452,6 +465,8 @@ export default function GlobeMap({
   onSelectCountry,
   selectedCountryName = null,
   mobileVisible = true,
+  selectedPort = null,
+  onSelectPort,
 }: {
   events: Event[];
   selectedEvent: Event | null;
@@ -470,6 +485,8 @@ export default function GlobeMap({
   onSelectCountry?: (name: string) => void;
   selectedCountryName?: string | null;
   mobileVisible?: boolean;
+  selectedPort?: PortFeature | null;
+  onSelectPort?: (port: PortFeature) => void;
 }) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -767,6 +784,8 @@ export default function GlobeMap({
       ? { lat: selectedMilitaryBase.lat, lng: selectedMilitaryBase.lng, altitude: FOCUSED_POV_ALTITUDE }
       : selectedFleetGroup
       ? { lat: selectedFleetGroup.lat, lng: selectedFleetGroup.lng, altitude: FOCUSED_POV_ALTITUDE }
+      : selectedPort
+      ? { lat: selectedPort.lat, lng: selectedPort.lng, altitude: FOCUSED_POV_ALTITUDE }
       : selectedCountryName
       ? (() => {
           const feature = countryFeatures.find(
@@ -802,14 +821,14 @@ export default function GlobeMap({
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
     globe.pointOfView(fallback, 900);
     priorPointOfViewRef.current = null;
-  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedCountryName, countryFeatures]);
+  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedPort?.name, selectedCountryName, countryFeatures]);
 
   // Close the marker popup once its "Expand" button hands off to the real
   // detail panel (selectedEvent/selectedMilitaryBase/selectedCountryName
   // becoming set), so it never lingers on screen behind/alongside the panel.
   useEffect(() => {
-    if (selectedEvent || selectedMilitaryBase || selectedFleetGroup || selectedCountryName) setPopupTarget(null);
-  }, [selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedCountryName]);
+    if (selectedEvent || selectedMilitaryBase || selectedFleetGroup || selectedCountryName || selectedPort) setPopupTarget(null);
+  }, [selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedCountryName, selectedPort?.name]);
 
   // Keep the popup glued to its marker's projected screen position every
   // frame while open, so it tracks correctly through globe rotation/zoom —
@@ -863,21 +882,6 @@ export default function GlobeMap({
   const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
 
-    if (activeLayers.ports) {
-      layerPoints.push(
-        ...portsToRender.map((port) => ({
-          id: `port-${port.name}`,
-          kind: "port" as const,
-          lat: port.lat,
-          lng: port.lng,
-          color: "#93c5fd",
-          radius: 0.14,
-          altitude: FLAT_ALTITUDE,
-          label: `Port: ${port.name}${port.country ? ` (${port.country})` : ""}`,
-        }))
-      );
-    }
-
     if (activeLayers.navalVessels) {
       layerPoints.push(
         ...navalVessels.map((vessel) => ({
@@ -926,11 +930,9 @@ export default function GlobeMap({
     return [...layerPoints];
   }, [
     activeLayers.navalVessels,
-    activeLayers.ports,
     activeLayers.storms,
     activeLayers.wildfires,
     navalVessels,
-    portsToRender,
     storms,
     wildfires,
   ]);
@@ -986,8 +988,24 @@ export default function GlobeMap({
       });
     }
 
+    if (activeLayers.ports) {
+      portsToRender.forEach((port) => {
+        markers.push({
+          id: `port-${port.name}`,
+          lat: port.lat,
+          lng: port.lng,
+          altitude: FLAT_ALTITUDE,
+          color: "#93c5fd",
+          size: 10,
+          label: `⚓ ${port.displayName}${port.country ? ` (${port.country})` : ""}`,
+          kind: "port",
+          port,
+        });
+      });
+    }
+
     return markers;
-  }, [events, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups]);
+  }, [events, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups, activeLayers.ports, portsToRender]);
 
   // Kept in sync (below, on every render) so the proximity-click handler
   // effect can read the latest markers without needing to reattach its
@@ -1016,6 +1034,7 @@ export default function GlobeMap({
             event: marker.event,
             base: marker.base,
             fleetGroup: marker.fleetGroup,
+            port: marker.port,
           }
     );
   }, []);
@@ -1459,6 +1478,18 @@ export default function GlobeMap({
                     </div>
                     <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.countryName}</div>
                   </>
+                ) : popupTarget.kind === "port" && popupTarget.port ? (
+                  <>
+                    <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      Seaport{popupTarget.port.details?.chokepoint ? " • Chokepoint" : ""}
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
+                      ⚓ {popupTarget.port.displayName}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      {popupTarget.port.country || "N/A"} — {popupTarget.port.size}
+                    </div>
+                  </>
                 ) : popupTarget.kind === "fleetGroup" && popupTarget.fleetGroup ? (
                   <>
                     <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
@@ -1478,6 +1509,7 @@ export default function GlobeMap({
                     if (popupTarget.kind === "event" && popupTarget.event) onSelectEvent(popupTarget.event);
                     else if (popupTarget.kind === "militaryBase" && popupTarget.base) onSelectMilitaryBase?.(popupTarget.base);
                     else if (popupTarget.kind === "fleetGroup" && popupTarget.fleetGroup) onSelectFleetGroup?.(popupTarget.fleetGroup);
+                    else if (popupTarget.kind === "port" && popupTarget.port) onSelectPort?.(popupTarget.port);
                     else if (popupTarget.kind === "country" && popupTarget.countryName) onSelectCountry?.(popupTarget.countryName);
                     setPopupTarget(null);
                   }}
