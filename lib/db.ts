@@ -145,27 +145,34 @@ export interface EventHistoryRow {
 }
 
 export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> {
-  await ensureSchema();
-  const db = getPool();
-  const { rows } = await db.query(
-    `SELECT title, category, lat, lng, source, url, description, event_timestamp, first_seen_at
-     FROM event_snapshots
-     WHERE first_seen_at > now() - ($1::text || ' days')::interval
-     ORDER BY first_seen_at DESC
-     LIMIT 500;`,
-    [days]
-  );
-  return rows.map((r) => ({
-    title: r.title,
-    category: r.category,
-    lat: Number(r.lat),
-    lng: Number(r.lng),
-    source: r.source,
-    url: r.url,
-    description: r.description,
-    eventTimestamp: r.event_timestamp,
-    firstSeenAt: r.first_seen_at,
-  }));
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const { rows } = await db.query(
+      `SELECT title, category, lat, lng, source, url, description, event_timestamp, first_seen_at
+       FROM event_snapshots
+       WHERE first_seen_at > now() - ($1::text || ' days')::interval
+       ORDER BY first_seen_at DESC
+       LIMIT 500;`,
+      [days]
+    );
+    return rows.map((r) => ({
+      title: r.title,
+      category: r.category,
+      lat: Number(r.lat),
+      lng: Number(r.lng),
+      source: r.source,
+      url: r.url,
+      description: r.description,
+      eventTimestamp: r.event_timestamp,
+      firstSeenAt: r.first_seen_at,
+    }));
+  } catch (err) {
+    // History is a best-effort enrichment layer (e.g. unavailable in local dev
+    // without a real Postgres connection string) — never let it 500 the caller.
+    console.error("getRecentEvents failed:", err);
+    return [];
+  }
 }
 
 // Append (not overwrite) each scraped USNI edition, keyed by region+published
@@ -218,24 +225,29 @@ export interface FleetHistoryRow {
 }
 
 export async function getRecentFleetSnapshots(days: number): Promise<FleetHistoryRow[]> {
-  await ensureSchema();
-  const db = getPool();
-  const { rows } = await db.query(
-    `SELECT region_id, region, group_name, ships, capabilities, mission_set, outlook, published_at
-     FROM fleet_snapshots
-     WHERE captured_at > now() - ($1::text || ' days')::interval
-     ORDER BY captured_at DESC
-     LIMIT 200;`,
-    [days]
-  );
-  return rows.map((r) => ({
-    regionId: r.region_id,
-    region: r.region,
-    groupName: r.group_name,
-    ships: r.ships as string[],
-    capabilities: r.capabilities,
-    missionSet: r.mission_set,
-    outlook: r.outlook,
-    publishedAt: r.published_at,
-  }));
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const { rows } = await db.query(
+      `SELECT region_id, region, group_name, ships, capabilities, mission_set, outlook, published_at
+       FROM fleet_snapshots
+       WHERE captured_at > now() - ($1::text || ' days')::interval
+       ORDER BY captured_at DESC
+       LIMIT 200;`,
+      [days]
+    );
+    return rows.map((r) => ({
+      regionId: r.region_id,
+      region: r.region,
+      groupName: r.group_name,
+      ships: r.ships as string[],
+      capabilities: r.capabilities,
+      missionSet: r.mission_set,
+      outlook: r.outlook,
+      publishedAt: r.published_at,
+    }));
+  } catch (err) {
+    console.error("getRecentFleetSnapshots failed:", err);
+    return [];
+  }
 }
