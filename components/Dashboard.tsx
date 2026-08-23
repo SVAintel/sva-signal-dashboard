@@ -143,6 +143,10 @@ export default function Dashboard() {
   const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
   const [fleetLoading, setFleetLoading] = useState(false);
   const [fleetLastChecked, setFleetLastChecked] = useState<string>("");
+  const [staleCountryFlags, setStaleCountryFlags] = useState<
+    { country: string; issue: string; evidence: string | null; detectedAt: string }[]
+  >([]);
+  const [staleCountryPanelOpen, setStaleCountryPanelOpen] = useState(false);
   const [fleetSourceUrl, setFleetSourceUrl] = useState<string | null>(null);
   const [fleetPublishedAt, setFleetPublishedAt] = useState<string | null>(null);
   const [activeLayers, setActiveLayers] = useState({
@@ -363,6 +367,28 @@ export default function Dashboard() {
     if (stored === "2d" || stored === "3d") {
       setMapViewMode(stored);
     }
+  }, []);
+
+  // Polls the country-data staleness flags (see lib/country-staleness-check.ts
+  // + app/api/country-staleness/route.ts) set by the once-daily cron check
+  // that cross-references curated country-details.ts profiles against the
+  // live signal feed — e.g. catching a leader captured/killed/replaced or a
+  // war starting/ending before the curated profile is manually updated.
+  // This is a cheap read-only DB query (no Gemini call), so a longer poll
+  // interval here is just to pick up newly-set/cleared flags without a
+  // full page reload, not to limit request cost.
+  useEffect(() => {
+    const fetchStaleFlags = async () => {
+      try {
+        const res = await axios.get("/api/country-staleness");
+        setStaleCountryFlags(res.data?.flags || []);
+      } catch (error) {
+        console.error("Failed to fetch country staleness flags:", error);
+      }
+    };
+    fetchStaleFlags();
+    const interval = setInterval(fetchStaleFlags, 60 * 60 * 1000); // 1h
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -596,6 +622,34 @@ export default function Dashboard() {
             >
               UPDATE FAILED — SHOWING STALE DATA
             </span>
+          )}
+          {staleCountryFlags.length > 0 && (
+            <div className="relative ml-2 shrink-0">
+              <button
+                onClick={() => setStaleCountryPanelOpen((v) => !v)}
+                className="flex items-center gap-1 rounded border border-amber-600/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-400 transition hover:bg-amber-900/50"
+                title="Some curated country profiles may be out of date based on recent live signals"
+              >
+                ⚠ {staleCountryFlags.length} Data Alert{staleCountryFlags.length !== 1 ? "S" : ""}
+              </button>
+              {staleCountryPanelOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[90vw] rounded border border-amber-600/60 bg-[#0e0e0ecc] p-3 text-[10px] backdrop-blur">
+                  <p className="mb-2 text-slate-400">
+                    These curated country profiles may be stale — a recent live signal appears to contradict them.
+                    Review and update <code className="text-amber-400">lib/data/country-details.ts</code> if
+                    confirmed.
+                  </p>
+                  <div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
+                    {staleCountryFlags.map((flag) => (
+                      <div key={flag.country} className="rounded border border-slate-700 p-2">
+                        <div className="mb-1 font-bold uppercase tracking-wider text-amber-400">{flag.country}</div>
+                        <div className="text-slate-300">{flag.issue}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           <AmbientAudio
             playing={ambientPlaying}

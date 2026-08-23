@@ -30,5 +30,25 @@ export async function GET(req: NextRequest) {
     ok: results[i].status === "fulfilled" && (results[i] as PromiseFulfilledResult<Response>).value.ok,
   }));
 
-  return NextResponse.json({ refreshed: summary, timestamp: new Date().toISOString() });
+  // Also runs the once-daily country-data staleness check (see
+  // lib/country-staleness-check.ts). It's a separate route rather than an
+  // inline function call so it has its own clear log namespace/URL to hit
+  // manually, but it still requires the same CRON_SECRET auth, so forward
+  // the header this request already carried and validated above.
+  let stalenessCheckOk = false;
+  try {
+    const stalenessRes = await fetch(`${origin}/api/cron/country-staleness`, {
+      cache: "no-store",
+      headers: authHeader ? { authorization: authHeader } : undefined,
+    });
+    stalenessCheckOk = stalenessRes.ok;
+  } catch (error) {
+    console.error("[cron/refresh] country-staleness check failed:", error);
+  }
+
+  return NextResponse.json({
+    refreshed: summary,
+    countryStalenessCheckOk: stalenessCheckOk,
+    timestamp: new Date().toISOString(),
+  });
 }

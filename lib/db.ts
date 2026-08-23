@@ -104,6 +104,21 @@ function ensureSchema(): Promise<void> {
           CONSTRAINT fleet_tracker_cache_singleton CHECK (id = 1)
         );
       `);
+
+      // Flags a curated country-details.ts profile as possibly out of date
+      // (e.g. a leader captured/killed/replaced, a war starting/ending, a
+      // government collapsing) based on a periodic AI comparison against the
+      // live signal feed — see lib/country-staleness-check.ts. One row per
+      // country; re-checks upsert (refresh the issue/evidence) or clear it
+      // once the underlying country-details.ts entry is updated to match.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS country_staleness_flags (
+          country TEXT PRIMARY KEY,
+          issue TEXT NOT NULL,
+          evidence TEXT,
+          detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `);
     })();
   }
   return schemaReady;
@@ -332,5 +347,80 @@ export async function setFleetTrackerCache(cache: {
     );
   } catch (err) {
     console.error("setFleetTrackerCache failed:", err);
+  }
+}
+
+export interface CountryStalenessFlag {
+  country: string;
+  issue: string;
+  evidence: string | null;
+  detectedAt: string;
+}
+
+// Active (unresolved) country-data staleness flags, most recently detected
+// first. Read-only and cheap — safe for the frontend to poll directly,
+// unlike the check itself (see lib/country-staleness-check.ts) which makes a
+// Gemini call and should only run from the daily cron.
+export async function getActiveCountryStalenessFlags(): Promise<CountryStalenessFlag[]> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const { rows } = await db.query(
+      `SELECT country, issue, evidence, detected_at FROM country_staleness_flags ORDER BY detected_at DESC;`
+    );
+    return rows.map((r) => ({
+      country: r.country,
+      issue: r.issue,
+      evidence: r.evidence,
+      detectedAt: r.detected_at,
+    }));
+  } catch (err) {
+    console.error("getActiveCountryStalenessFlags failed:", err);
+    return [];
+  }
+}
+
+// Upserts a staleness flag for a country (new issue text replaces the old
+// one on re-detection, e.g. a follow-on development). Best-effort.
+export async function setCountryStalenessFlag(country: string, issue: string, evidence: string): Promise<void> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `INSERT INTO country_staleness_flags (country, issue, evidence, detected_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (country) DO UPDATE SET issue = EXCLUDED.issue, evidence = EXCLUDED.evidence, detected_at = now();`,
+      [country, issue, evidence]
+    );
+  } catch (err) {
+    console.error("setCountryStalenessFlag failed:", err);
+  }
+}
+
+// Clears a country's flag — called when a re-check finds the curated profile
+// no longer conflicts with live signals (e.g. after a developer updates
+// country-details.ts to match reality, as done for Iran and Venezuela).
+export async function clearCountryStalenessFlag(country: string): Promise<void> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(`DELETE FROM country_staleness_flags WHERE country = $1;`, [country]);
+  } catch (err) {
+    console.error("clearCountryStalenessFlag failed:", err);
+  }
+}
+
+// Prevents old, never-reviewed flags from accumulating forever if a country
+// stops appearing in the live signal feed before anyone acts on its flag.
+export async function pruneOldCountryStalenessFlags(days: number): Promise<void> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `DELETE FROM country_staleness_flags WHERE detected_at < now() - ($1::text || ' days')::interval;`,
+      [days]
+    );
+  } catch (err) {
+    console.error("pruneOldCountryStalenessFlags failed:", err);
   }
 }
