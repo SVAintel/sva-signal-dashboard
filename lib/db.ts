@@ -84,6 +84,26 @@ function ensureSchema(): Promise<void> {
         );
       `);
       await db.query(`CREATE INDEX IF NOT EXISTS fleet_snapshots_captured_idx ON fleet_snapshots (captured_at);`);
+
+      // Single-row cache for the fleet-tracker API response itself (distinct
+      // from fleet_snapshots' append-only history table above). Vercel's
+      // serverless filesystem is ephemeral, so the route's previous
+      // disk-file cache (.fleet-tracker-cache.json) silently failed to
+      // persist between invocations in production, causing a re-scrape of
+      // USNI on effectively every cold start instead of the intended 12h
+      // cadence. This table gives the route a cache that actually survives
+      // across invocations/instances.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS fleet_tracker_cache (
+          id INTEGER PRIMARY KEY DEFAULT 1,
+          groups JSONB NOT NULL,
+          source_url TEXT,
+          source_title TEXT,
+          published_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT fleet_tracker_cache_singleton CHECK (id = 1)
+        );
+      `);
     })();
   }
   return schemaReady;
@@ -249,5 +269,68 @@ export async function getRecentFleetSnapshots(days: number): Promise<FleetHistor
   } catch (err) {
     console.error("getRecentFleetSnapshots failed:", err);
     return [];
+  }
+}
+
+export interface FleetTrackerCache {
+  groups: FleetGroup[];
+  sourceUrl: string;
+  sourceTitle: string;
+  publishedAt: string | null;
+  updatedAt: string;
+}
+
+// Reads the single cached fleet-tracker API response, if any. Returns null on
+// a cache miss or any DB error (e.g. no Postgres connection string configured
+// in local dev) so the route can fall back to a fresh scrape either way.
+export async function getFleetTrackerCache(): Promise<FleetTrackerCache | null> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const { rows } = await db.query(
+      `SELECT groups, source_url, source_title, published_at, updated_at
+       FROM fleet_tracker_cache WHERE id = 1;`
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      groups: row.groups as FleetGroup[],
+      sourceUrl: row.source_url,
+      sourceTitle: row.source_title,
+      publishedAt: row.published_at,
+      updatedAt: row.updated_at,
+    };
+  } catch (err) {
+    console.error("getFleetTrackerCache failed:", err);
+    return null;
+  }
+}
+
+// Upserts the single cached fleet-tracker API response. Best-effort — a
+// write failure here shouldn't take down the route, which can still serve
+// the freshly-scraped result for the current request even if it couldn't be
+// persisted for the next cold start.
+export async function setFleetTrackerCache(cache: {
+  groups: FleetGroup[];
+  sourceUrl: string;
+  sourceTitle: string;
+  publishedAt: string | null;
+}): Promise<void> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `INSERT INTO fleet_tracker_cache (id, groups, source_url, source_title, published_at, updated_at)
+       VALUES (1, $1, $2, $3, $4, now())
+       ON CONFLICT (id) DO UPDATE SET
+         groups = EXCLUDED.groups,
+         source_url = EXCLUDED.source_url,
+         source_title = EXCLUDED.source_title,
+         published_at = EXCLUDED.published_at,
+         updated_at = now();`,
+      [JSON.stringify(cache.groups), cache.sourceUrl, cache.sourceTitle, cache.publishedAt]
+    );
+  } catch (err) {
+    console.error("setFleetTrackerCache failed:", err);
   }
 }

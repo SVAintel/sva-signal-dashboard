@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
 import { lookupFleetRegionCoords, lookupFleetRegionEventKeywords } from "@/lib/data/fleet-region-coords";
 import { summarizeShipCapabilities } from "@/lib/data/ship-class-info";
 import { generateMockEvents } from "@/lib/event-generator";
-import { recordFleetSnapshot } from "@/lib/db";
+import { recordFleetSnapshot, getFleetTrackerCache, setFleetTrackerCache } from "@/lib/db";
 import type { FleetGroup } from "@/lib/data/fleet-group-type";
 export type { FleetGroup } from "@/lib/data/fleet-group-type";
 
@@ -13,8 +11,11 @@ export type { FleetGroup } from "@/lib/data/fleet-group-type";
 // independently deployed surface combatants, described by NAMED REGION
 // (e.g. "In the Arabian Sea"), never precise coordinates, for operational-
 // security reasons. USNI publishes a new edition roughly weekly (usually
-// Mondays), so this route only needs to re-scrape on that cadence — a long
-// disk-backed cache avoids hammering their site on every page load.
+// Mondays), so this route only needs to re-scrape on that cadence — an
+// in-memory cache (per warm instance) backed by a Postgres row (so the
+// cache actually survives across serverless invocations/cold starts on
+// Vercel, whose filesystem is ephemeral) avoids hammering their site on
+// every page load.
 export const dynamic = "force-dynamic";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -24,7 +25,6 @@ const GEMINI_MODEL = "gemini-3.5-flash-lite";
 // hours of publishing, without scraping on every request. This also caps how
 // often the AI mission-set/outlook analysis below is regenerated.
 const CACHE_MS = 12 * 60 * 60 * 1000;
-const CACHE_FILE = path.join(process.cwd(), ".fleet-tracker-cache.json");
 
 interface FleetCache {
   groups: FleetGroup[];
@@ -34,24 +34,11 @@ interface FleetCache {
   ts: number;
 }
 
+// In-memory cache, fastest path for repeat requests hitting the same warm
+// serverless instance (or the long-lived local dev process). Falls back to
+// the Postgres-backed cache below whenever this is empty (e.g. right after
+// a cold start), and to a fresh USNI scrape only if both are empty/stale.
 const g = globalThis as unknown as { __fleetTrackerCache?: FleetCache | null };
-
-function readCacheFromDisk(): FleetCache | null {
-  try {
-    const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function writeCacheToDisk(cache: FleetCache) {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache));
-  } catch (error) {
-    console.error("[fleet-tracker] failed to write disk cache:", error);
-  }
-}
 
 function stripTags(html: string): string {
   return html
@@ -272,7 +259,19 @@ async function fetchLatestEdition(): Promise<FleetCache | null> {
 export async function GET() {
   try {
     if (g.__fleetTrackerCache === undefined) {
-      g.__fleetTrackerCache = readCacheFromDisk();
+      // Cold start (or first request on this instance): the in-memory cache
+      // is empty, so check the durable Postgres-backed cache before falling
+      // back to a fresh USNI scrape below.
+      const dbCache = await getFleetTrackerCache();
+      g.__fleetTrackerCache = dbCache
+        ? {
+            groups: dbCache.groups,
+            sourceUrl: dbCache.sourceUrl,
+            sourceTitle: dbCache.sourceTitle,
+            publishedAt: dbCache.publishedAt,
+            ts: new Date(dbCache.updatedAt).getTime(),
+          }
+        : null;
     }
 
     const cache = g.__fleetTrackerCache;
@@ -283,10 +282,17 @@ export async function GET() {
         const fresh = await fetchLatestEdition();
         if (fresh) {
           g.__fleetTrackerCache = fresh;
-          writeCacheToDisk(fresh);
-          // Append (not overwrite) into Postgres history so weekly-brief
-          // generation has real trailing data, unlike the disk cache above
-          // which only ever holds the current edition.
+          // Persist to Postgres so the cache survives across serverless
+          // invocations/cold starts (Vercel's filesystem is ephemeral).
+          await setFleetTrackerCache({
+            groups: fresh.groups,
+            sourceUrl: fresh.sourceUrl,
+            sourceTitle: fresh.sourceTitle,
+            publishedAt: fresh.publishedAt,
+          });
+          // Append (not overwrite) into fleet_snapshots history so
+          // weekly-brief generation has real trailing data, unlike the
+          // single-row cache above which only ever holds the current edition.
           await recordFleetSnapshot(fresh.groups, fresh.sourceUrl, fresh.publishedAt);
         }
       } catch (error) {
