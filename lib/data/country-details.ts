@@ -1048,19 +1048,28 @@ export const COUNTRY_DETAILS: Record<string, CountryDetail> = {
     region: "South America",
     capital: "Caracas",
     population: "~28 million (millions more have emigrated since 2015)",
-    governmentType: "Presidential republic (widely described as authoritarian)",
-    rulingParties: "President Nicolás Maduro (PSUV/Chavista), disputed re-election in 2024 amid allegations of fraud and opposition-claimed victory.",
+    governmentType: "Presidential republic (widely described as authoritarian); in active post-Maduro political transition",
+    rulingParties:
+      "Nicolás Maduro (PSUV/Chavista) was captured by U.S. forces in a January 3, 2026 military operation " +
+      "(\"Operation Absolute Resolve\") and flown to the U.S. to face narcoterrorism/drug-trafficking charges. " +
+      "Delcy Rodríguez, his former VP, was sworn in January 4, 2026 as acting president per the constitutional " +
+      "line of succession, backed by the Supreme Court and Chavista-led National Assembly, with significant U.S. " +
+      "oversight of the transition (oil sector, security). Opposition figures María Corina Machado and 2024 " +
+      "presidential candidate Edmundo González Urrutia remain largely outside the negotiations, so a genuine " +
+      "democratic transition/election roadmap is unresolved.",
     gdp: "~$100 billion (nominal, sharply diminished from oil-boom peak)",
     majorExports: ["Crude oil", "Petroleum products", "Gold"],
-    topTradePartners: ["China", "United States (limited, sanctions-affected)", "India", "Cuba"],
+    topTradePartners: ["China", "United States (rapidly reopening post-transition)", "India", "Cuba"],
     militaryBranches: ["National Bolivarian Armed Forces (Army, Navy, Air Force, National Guard)"],
     activePersonnel: "~120,000–150,000",
-    defenseBudget: "Not transparently disclosed; degraded by economic crisis",
-    alliances: ["Close ties with Russia, China, Cuba, Iran; not aligned with Western defense structures"],
+    defenseBudget: "Not transparently disclosed; degraded by economic crisis and the January 2026 U.S. strikes",
+    alliances: ["Historic close ties with Russia, China, Cuba, Iran; realigning amid heavy U.S. involvement since the Maduro capture"],
     summary:
-      "Maduro's disputed 2024 re-election, mass emigration (one of the world's largest displacement crises), and a " +
-      "renewed territorial dispute with Guyana over the oil-rich Essequibo region make Venezuela one of the " +
-      "hemisphere's most volatile flashpoints.",
+      "The U.S. captured Maduro in a January 2026 military raid on Caracas, ending his presidency; Delcy Rodríguez " +
+      "now leads an interim Chavista government under heavy U.S. oversight while Washington pushes to open " +
+      "Venezuela's oil sector and negotiate a longer-term transition. Mass historical emigration and the " +
+      "long-running Essequibo territorial dispute with Guyana remain unresolved and continue to make Venezuela " +
+      "one of the hemisphere's most volatile flashpoints.",
   },
   Guyana: {
     region: "South America",
