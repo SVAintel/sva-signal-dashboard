@@ -119,6 +119,18 @@ function ensureSchema(): Promise<void> {
           detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
       `);
+
+      // Generic single-value-per-key JSON cache for routes that just need a
+      // durable "last good response" surviving Vercel's ephemeral filesystem
+      // (naval, market-health, Alpha Vantage quotes) without a bespoke table
+      // each — same durability fix as fleet_tracker_cache above, generalized.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS app_cache (
+          key TEXT PRIMARY KEY,
+          value JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `);
     })();
   }
   return schemaReady;
@@ -347,6 +359,38 @@ export async function setFleetTrackerCache(cache: {
     );
   } catch (err) {
     console.error("setFleetTrackerCache failed:", err);
+  }
+}
+
+// Generic durable cache for routes that only need "last good JSON response,
+// keyed by name" (naval AIS snapshot, market-health quotes, Alpha Vantage
+// symbol quotes) — replaces per-route disk-file caches that silently failed
+// to persist on Vercel's ephemeral filesystem outside /tmp.
+export async function getAppCache<T = unknown>(key: string): Promise<{ value: T; updatedAt: string } | null> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    const { rows } = await db.query(`SELECT value, updated_at FROM app_cache WHERE key = $1;`, [key]);
+    const row = rows[0];
+    if (!row) return null;
+    return { value: row.value as T, updatedAt: row.updated_at };
+  } catch (err) {
+    console.error(`getAppCache(${key}) failed:`, err);
+    return null;
+  }
+}
+
+export async function setAppCache(key: string, value: unknown): Promise<void> {
+  try {
+    await ensureSchema();
+    const db = getPool();
+    await db.query(
+      `INSERT INTO app_cache (key, value, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();`,
+      [key, JSON.stringify(value)]
+    );
+  } catch (err) {
+    console.error(`setAppCache(${key}) failed:`, err);
   }
 }
 

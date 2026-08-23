@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import WebSocket from "ws";
-import fs from "fs";
-import path from "path";
+import { getAppCache, setAppCache } from "@/lib/db";
 
 // Best-effort naval vessel + oil tanker layer via AISStream.io.
 //
@@ -42,36 +41,30 @@ interface NavalVessel {
 }
 
 const CACHE_MS = 30 * 60 * 1000; // 30 minutes — matches the client polling interval
-const CACHE_FILE = path.join(process.cwd(), ".naval-cache.json");
+const CACHE_KEY = "naval";
 
 type NavalCache = { data: NavalVessel[]; ts: number; outage?: boolean };
 
 // GET requests must NEVER block on a live 90s AIS scan. Instead, a
 // self-scheduling background refresh loop (re-armed every CACHE_MS) keeps a
-// disk-backed snapshot warm, and requests just read whatever's cached. Disk
-// persistence survives dev-server restarts; the globalThis singleton guards
-// against Next.js dev hot-reload spawning duplicate refresh loops.
+// Postgres-backed snapshot warm, and requests just read whatever's cached.
+// Postgres persistence survives Vercel's ephemeral filesystem between
+// invocations (a disk file here previously did not); the globalThis
+// singleton guards against Next.js dev hot-reload spawning duplicate
+// refresh loops.
 const g = globalThis as unknown as {
   __navalCache?: NavalCache | null;
   __navalRefreshing?: boolean;
   __navalTimer?: ReturnType<typeof setTimeout>;
 };
 
-function readCacheFromDisk(): NavalCache | null {
-  try {
-    const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+async function readCacheFromDb(): Promise<NavalCache | null> {
+  const cached = await getAppCache<NavalCache>(CACHE_KEY);
+  return cached?.value || null;
 }
 
-function writeCacheToDisk(cache: NavalCache) {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache));
-  } catch (error) {
-    console.error("[naval] failed to write disk cache:", error);
-  }
+async function writeCacheToDb(cache: NavalCache) {
+  await setAppCache(CACHE_KEY, cache);
 }
 
 // AIS "Type of ship and cargo" code 35 = "Military ops" — the only official
@@ -186,10 +179,10 @@ export async function GET() {
   }
 
   if (g.__navalCache === undefined) {
-    g.__navalCache = readCacheFromDisk();
+    g.__navalCache = await readCacheFromDb();
   }
 
-  ensureRefreshLoopStarted();
+  await ensureRefreshLoopStarted();
 
   const cache = g.__navalCache;
   const ageMs = cache ? Date.now() - cache.ts : null;
@@ -209,7 +202,7 @@ async function runRefresh() {
     const { vessels, outage } = await collectNavalVessels();
     const cache: NavalCache = { data: vessels, ts: Date.now(), outage };
     g.__navalCache = cache;
-    writeCacheToDisk(cache);
+    await writeCacheToDb(cache);
   } catch (error) {
     console.error("[naval] background refresh error:", error);
   } finally {
@@ -217,7 +210,7 @@ async function runRefresh() {
   }
 }
 
-function ensureRefreshLoopStarted() {
+async function ensureRefreshLoopStarted() {
   if (g.__navalTimer) return; // loop already running (singleton across hot-reloads)
 
   const cache = g.__navalCache;

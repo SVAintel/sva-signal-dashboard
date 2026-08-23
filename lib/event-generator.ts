@@ -1,5 +1,6 @@
 import { Event } from "@/lib/types";
 import Parser from "rss-parser";
+import { getAppCache, setAppCache } from "@/lib/db";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
@@ -627,9 +628,20 @@ const ALPHA_VANTAGE_SYMBOLS: { symbol: string; label: string; lat: number; lng: 
   { symbol: "GLD", label: "Gold (safe-haven demand)", lat: 51.5138, lng: -0.0985 }, // London bullion market
   { symbol: "USO", label: "Crude oil (energy security)", lat: 29.7604, lng: -95.3698 }, // Houston energy hub
 ];
+const ALPHA_VANTAGE_CACHE_KEY = "alpha-vantage-market-events";
+const ALPHA_VANTAGE_CACHE_MS = 24 * 60 * 60 * 1000; // once a day
 
 async function fetchAlphaVantageEvents() {
   if (!ALPHA_VANTAGE_KEY) return [];
+
+  // Postgres-backed cache, refreshed once a day — Alpha Vantage's free tier
+  // caps out at 25 requests/day total (shared with market-health), so this
+  // no longer relies on Next's per-fetch revalidate window (which resets on
+  // every serverless cold start) to stay under quota.
+  const cached = await getAppCache<any[]>(ALPHA_VANTAGE_CACHE_KEY);
+  if (cached && Date.now() - new Date(cached.updatedAt).getTime() < ALPHA_VANTAGE_CACHE_MS) {
+    return cached.value;
+  }
 
   const results = await Promise.allSettled(
     ALPHA_VANTAGE_SYMBOLS.map(async ({ symbol, label, lat, lng }) => {
@@ -638,7 +650,7 @@ async function fetchAlphaVantageEvents() {
       try {
         const res = await fetch(
           `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${ALPHA_VANTAGE_KEY}`,
-          { signal: controller.signal, next: { revalidate: 21600 } } // 6h — Alpha Vantage free tier caps at 25 req/day
+          { signal: controller.signal, cache: "no-store" }
         );
         clearTimeout(timeout);
         const data = await res.json();
@@ -666,9 +678,18 @@ async function fetchAlphaVantageEvents() {
     })
   );
 
-  return results
+  const events = results
     .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value !== null)
     .map((r) => r.value);
+
+  if (events.length > 0) {
+    await setAppCache(ALPHA_VANTAGE_CACHE_KEY, events);
+    return events;
+  }
+
+  // Quota exhausted / all calls failed this cycle — keep serving yesterday's
+  // cached events rather than dropping the "market" category entirely.
+  return cached?.value || [];
 }
 
 // USGS Earthquakes - free, no key

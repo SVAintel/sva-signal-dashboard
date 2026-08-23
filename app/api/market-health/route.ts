@@ -1,5 +1,4 @@
-import fs from "fs";
-import path from "path";
+import { getAppCache, setAppCache } from "@/lib/db";
 
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
 
@@ -7,15 +6,16 @@ const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
 // gauges, all via liquid ETF proxies since Alpha Vantage's free tier doesn't
 // carry raw index/commodity tickers like ^GSPC/^VIX or spot WTI/gold.
 //
-// A disk-backed cache (same pattern as the fleet-tracker route) guarantees we
-// only hit Alpha Vantage twice a day, no matter how often the client polls or
-// how many times the dev server restarts — relying solely on Next's fetch()
-// revalidate window isn't enough since that in-memory cache resets on every
-// server restart, which is what blew through the 25-req/day quota earlier.
+// A Postgres-backed cache (same pattern as fleet-tracker/naval) guarantees we
+// only hit Alpha Vantage once a day, no matter how often the client polls,
+// how many serverless instances are cold-starting, or how many times the dev
+// server restarts — relying solely on Next's fetch() revalidate window or a
+// disk file isn't enough since Vercel's filesystem is ephemeral, which is
+// what blew through the 25-req/day quota earlier.
 export const dynamic = "force-dynamic";
 
-const CACHE_MS = 12 * 60 * 60 * 1000; // twice a day
-const CACHE_FILE = path.join(process.cwd(), ".market-health-cache.json");
+const CACHE_MS = 24 * 60 * 60 * 1000; // once a day
+const CACHE_KEY = "market-health";
 
 const INDEXES = [
   { symbol: "SPY", label: "S&P 500", color: "#d4b36a" },
@@ -53,21 +53,13 @@ interface MarketCache {
 
 const g = globalThis as unknown as { __marketHealthCache?: MarketCache | null };
 
-function readCacheFromDisk(): MarketCache | null {
-  try {
-    const raw = fs.readFileSync(CACHE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+async function readCacheFromDb(): Promise<MarketCache | null> {
+  const cached = await getAppCache<MarketCache>(CACHE_KEY);
+  return cached?.value || null;
 }
 
-function writeCacheToDisk(cache: MarketCache) {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache));
-  } catch (error) {
-    console.error("[market-health] failed to write disk cache:", error);
-  }
+async function writeCacheToDb(cache: MarketCache) {
+  await setAppCache(CACHE_KEY, cache);
 }
 
 async function fetchSeries(list: { symbol: string; label: string; color: string }[]): Promise<FetchedSeries[]> {
@@ -159,7 +151,7 @@ export async function GET() {
   }
 
   if (g.__marketHealthCache === undefined) {
-    g.__marketHealthCache = readCacheFromDisk();
+    g.__marketHealthCache = await readCacheFromDb();
   }
 
   const cache = g.__marketHealthCache;
@@ -175,7 +167,7 @@ export async function GET() {
 
       const next: MarketCache = { indexes: mergedIndexes, riskIndicators: mergedRisk, ts: Date.now() };
       g.__marketHealthCache = next;
-      writeCacheToDisk(next);
+      await writeCacheToDb(next);
     } catch (error) {
       console.error("[market-health] refresh failed, serving stale/empty cache:", error);
     }

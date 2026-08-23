@@ -1,18 +1,27 @@
+import { getAppCache, setAppCache } from "@/lib/db";
+
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
 
-// Alpha Vantage's free tier caps out at 25 requests/day total. This route was
-// previously fully dynamic (no caching at all) — every page load / symbol
-// switch hit the upstream API fresh, which exhausts the daily quota almost
-// immediately. Cache per-symbol for 6h so repeat visits/symbol-switches reuse
-// the same cached response instead of re-pulling.
-export const revalidate = 21600;
+// Alpha Vantage's free tier caps out at 25 requests/day total, shared across
+// this route, market-health, and the event-generator's market-signal quotes.
+// Cached once/day per-symbol in Postgres (survives Vercel's ephemeral
+// filesystem/cold starts) instead of relying solely on Next's per-fetch
+// revalidate window.
+const CACHE_MS = 24 * 60 * 60 * 1000; // once a day
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get("symbol") || "AAPL";
+  const cacheKey = `stocks-${symbol}`;
 
   if (!ALPHA_VANTAGE_KEY) {
     return Response.json(generateMockStockData(symbol));
+  }
+
+  const cached = await getAppCache<any[]>(cacheKey);
+  if (cached && Date.now() - new Date(cached.updatedAt).getTime() < CACHE_MS) {
+    return Response.json(cached.value);
   }
 
   try {
@@ -21,7 +30,7 @@ export async function GET(request: Request) {
 
     const res = await fetch(
       `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&outputsize=compact&apikey=${ALPHA_VANTAGE_KEY}`,
-      { signal: controller.signal, next: { revalidate: 21600 } }
+      { signal: controller.signal, cache: "no-store" }
     );
     clearTimeout(timeout);
 
@@ -37,10 +46,17 @@ export async function GET(request: Request) {
         symbol,
       }));
 
-    return Response.json(chartData.length > 0 ? chartData : generateMockStockData(symbol));
+    if (chartData.length > 0) {
+      await setAppCache(cacheKey, chartData);
+      return Response.json(chartData);
+    }
+
+    // Quota exhausted / no data this cycle — keep serving yesterday's cache
+    // if we have it, rather than falling back to mock data unnecessarily.
+    return Response.json(cached?.value || generateMockStockData(symbol));
   } catch (e) {
     console.error("Alpha Vantage error:", e);
-    return Response.json(generateMockStockData(symbol));
+    return Response.json(cached?.value || generateMockStockData(symbol));
   }
 }
 
