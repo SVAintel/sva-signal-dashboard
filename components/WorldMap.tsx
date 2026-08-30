@@ -1,6 +1,6 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, Tooltip, useMap, AttributionControl } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
@@ -449,30 +449,43 @@ const EventPingRings = memo(function EventPingRings({ event }: { event: Event | 
     // would start this loop before anchorRef.current ever exists and never
     // retry — leaving rings frozen at their initial size/opacity forever.
     let raf: number;
+    // This loop runs for the lifetime of the map regardless of whether any
+    // ping rings are currently active (they're only shown briefly after
+    // clicking an event) — same pattern as the radar sweep's own loop, so it
+    // gets the same "skip redundant work/writes when idle" treatment to
+    // avoid two always-on rAF loops fighting for frame budget.
+    let lastOriginX: number | null = null;
+    let lastOriginY: number | null = null;
     const update = () => {
       if (anchorRef.current) {
         const origin = map.containerPointToLayerPoint([0, 0]);
-        anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+        if (origin.x !== lastOriginX || origin.y !== lastOriginY) {
+          anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+          lastOriginX = origin.x;
+          lastOriginY = origin.y;
+        }
       }
       // Drive each active ring's size/opacity directly from elapsed time —
       // keeps the border a constant thin width the whole way out instead of
       // it being stretched by a CSS transform:scale.
-      const now = performance.now();
-      ringElRefs.current.forEach((el, id) => {
-        const r = ringsRef.current.find((x) => x.id === id);
-        if (!r) return;
-        const elapsed = now - r.startAt;
-        if (elapsed < 0) return;
-        const t = Math.min(elapsed / RING_GROW_MS, 1);
-        const eased = 1 - Math.pow(1 - t, 3);
-        const size = RING_START_SIZE + (r.maxSize - RING_START_SIZE) * eased;
-        const opacity = Math.max(0, 0.7 * (1 - t));
-        el.style.width = `${size}px`;
-        el.style.height = `${size}px`;
-        el.style.left = `${r.x - size / 2}px`;
-        el.style.top = `${r.y - size / 2}px`;
-        el.style.opacity = `${opacity}`;
-      });
+      if (ringElRefs.current.size > 0) {
+        const now = performance.now();
+        ringElRefs.current.forEach((el, id) => {
+          const r = ringsRef.current.find((x) => x.id === id);
+          if (!r) return;
+          const elapsed = now - r.startAt;
+          if (elapsed < 0) return;
+          const t = Math.min(elapsed / RING_GROW_MS, 1);
+          const eased = 1 - Math.pow(1 - t, 3);
+          const size = RING_START_SIZE + (r.maxSize - RING_START_SIZE) * eased;
+          const opacity = Math.max(0, 0.7 * (1 - t));
+          el.style.width = `${size}px`;
+          el.style.height = `${size}px`;
+          el.style.left = `${r.x - size / 2}px`;
+          el.style.top = `${r.y - size / 2}px`;
+          el.style.opacity = `${opacity}`;
+        });
+      }
       raf = requestAnimationFrame(update);
     };
     raf = requestAnimationFrame(update);
@@ -624,6 +637,24 @@ function ScanSweep({
     // Avoid re-flashing the same marker multiple times within one sweep pass
     // if it happens to straddle two consecutive animation frames.
     const recentlyFlashed = new Map<string, number>();
+    // The bar's own translateX (and the anchor's pan/zoom counter-transform)
+    // are cheap and run every frame for a perfectly smooth sweep. Target
+    // crossing-detection and flash repositioning involve an O(targets)
+    // Leaflet projection call each, which used to run at full 60fps too —
+    // with 100+ combined events/bases that's a lot of unnecessary main-thread
+    // work fighting the animation for frame time. Throttling that part to
+    // ~15Hz is imperceptible for "did the sweep line cross this point yet"
+    // detection but removes the bulk of the per-frame cost.
+    const DETECTION_INTERVAL_MS = 66;
+    let lastDetectionT = 0;
+    // Cache the last-written anchor transform/size so an idle (non-panning,
+    // non-resizing) map — the overwhelming majority of the time the sweep is
+    // running — skips these style writes entirely instead of redundantly
+    // rewriting identical values on every single animation frame.
+    let lastOriginX: number | null = null;
+    let lastOriginY: number | null = null;
+    let lastSizeX: number | null = null;
+    let lastSizeY: number | null = null;
 
     const step = (t: number) => {
       if (start === null) start = t;
@@ -639,38 +670,64 @@ function ScanSweep({
       // valid exactly as if this were still rendered outside the map pane.
       if (anchorRef.current) {
         const origin = map.containerPointToLayerPoint([0, 0]);
-        anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
-        anchorRef.current.style.width = `${size.x}px`;
-        anchorRef.current.style.height = `${size.y}px`;
+        if (origin.x !== lastOriginX || origin.y !== lastOriginY) {
+          anchorRef.current.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+          lastOriginX = origin.x;
+          lastOriginY = origin.y;
+        }
+        if (size.x !== lastSizeX || size.y !== lastSizeY) {
+          anchorRef.current.style.width = `${size.x}px`;
+          anchorRef.current.style.height = `${size.y}px`;
+          lastSizeX = size.x;
+          lastSizeY = size.y;
+        }
       }
 
       if (barRef.current) {
         barRef.current.style.transform = `translateX(${currX}px)`;
       }
 
-      // Only check for crossings on frames where the sweep moved forward normally
-      // (skip the single frame where progress wraps back to 0 at loop restart).
-      if (progress >= prevProgress) {
-        const lo = Math.min(prevX, currX);
-        const hi = Math.max(prevX, currX);
-        const newFlashes: typeof flashes = [];
-        for (const target of targetsRef.current) {
-          const last = recentlyFlashed.get(target.id);
-          if (last !== undefined && t - last < durationMs * 0.5) continue;
-          const pt = map.latLngToContainerPoint([target.lat, target.lng]);
-          if (pt.x >= lo && pt.x <= hi && pt.y >= 0 && pt.y <= size.y) {
-            recentlyFlashed.set(target.id, t);
-            newFlashes.push({ id: `${target.id}-${t}`, lat: target.lat, lng: target.lng, title: target.title, ts: t });
+      if (t - lastDetectionT >= DETECTION_INTERVAL_MS) {
+        lastDetectionT = t;
+
+        // Only check for crossings on frames where the sweep moved forward normally
+        // (skip the single frame where progress wraps back to 0 at loop restart).
+        if (progress >= prevProgress) {
+          const lo = Math.min(prevX, currX);
+          const hi = Math.max(prevX, currX);
+          const newFlashes: typeof flashes = [];
+          const liveIds = new Set<string>();
+          for (const target of targetsRef.current) {
+            liveIds.add(target.id);
+            const last = recentlyFlashed.get(target.id);
+            if (last !== undefined && t - last < durationMs * 0.5) continue;
+            const pt = map.latLngToContainerPoint([target.lat, target.lng]);
+            if (pt.x >= lo && pt.x <= hi && pt.y >= 0 && pt.y <= size.y) {
+              recentlyFlashed.set(target.id, t);
+              newFlashes.push({ id: `${target.id}-${t}`, lat: target.lat, lng: target.lng, title: target.title, ts: t });
+            }
+          }
+          if (newFlashes.length > 0) {
+            setFlashes((f) => [...f, ...newFlashes]);
+          }
+          // Prevent recentlyFlashed from growing unbounded across long-running
+          // sessions as the underlying event/base list changes over time.
+          for (const id of recentlyFlashed.keys()) {
+            if (!liveIds.has(id)) recentlyFlashed.delete(id);
           }
         }
-        if (newFlashes.length > 0) {
-          setFlashes((f) => [...f, ...newFlashes]);
-        }
+
+        prevX = currX;
+        prevProgress = progress;
       }
 
       // Reposition all live flash bubbles to stay glued to their lat/lng,
       // regardless of pan/zoom — recomputed from the live map projection
-      // every frame rather than a one-time screen coordinate.
+      // every frame (unlike the detection loop above) since this is only
+      // O(active flashes), which is always small, and skipping frames here
+      // is what let a freshly-created flash sit at its default (0,0) —
+      // i.e. the map's top-left corner — for up to one throttle interval
+      // before its first real position landed.
       for (const [id, el] of flashElRefs.current) {
         if (!el) continue;
         const fl = flashesRef.current.find((f) => f.id === id);
@@ -679,8 +736,6 @@ function ScanSweep({
         el.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
       }
 
-      prevX = currX;
-      prevProgress = progress;
       raf = requestAnimationFrame(step);
     };
 
@@ -1022,7 +1077,9 @@ export default function WorldMap({
       maxBoundsViscosity={1.0}
       style={{ height: "100%", width: "100%", background: "#0a0a0a" }}
       zoomControl={false}
+      attributionControl={false}
     >
+      <AttributionControl prefix={false} />
       <MapFitter visible={mobileVisible} />
       <MapEventFocuser event={selectedEvent} />
       <MapMilitaryBaseFocuser base={selectedMilitaryBase} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
@@ -404,17 +404,27 @@ export default function Dashboard() {
   // Client-side filter by active categories, then by recency (time-range
   // selector). `activeTimeRangeHours === null` means no time filter (show
   // events of any age).
-  const events = allEvents
-    .filter((e) => activeCategories.includes(e.category))
-    .filter((e) => {
-      if (activeTimeRangeHours === null) return true;
-      const ageMs = Date.now() - new Date(e.timestamp).getTime();
-      return ageMs <= activeTimeRangeHours * 60 * 60 * 1000;
-    })
-    .filter((e) => {
-      if (verification === "all") return true;
-      return verification === "unconfirmed" ? isUnconfirmedSource(e.source) : !isUnconfirmedSource(e.source);
-    });
+  // Memoized so downstream consumers (WorldMap's marker layers and radar
+  // sweep in particular) only see a new `events` array reference when the
+  // underlying data or filters actually change, instead of on every
+  // unrelated Dashboard re-render (naval polling, clock ticks, etc.) — that
+  // churn was forcing the map to redo per-frame work needlessly, which is
+  // what made the sweep animation stutter over a long session.
+  const events = useMemo(
+    () =>
+      allEvents
+        .filter((e) => activeCategories.includes(e.category))
+        .filter((e) => {
+          if (activeTimeRangeHours === null) return true;
+          const ageMs = Date.now() - new Date(e.timestamp).getTime();
+          return ageMs <= activeTimeRangeHours * 60 * 60 * 1000;
+        })
+        .filter((e) => {
+          if (verification === "all") return true;
+          return verification === "unconfirmed" ? isUnconfirmedSource(e.source) : !isUnconfirmedSource(e.source);
+        }),
+    [allEvents, activeCategories, activeTimeRangeHours, verification]
+  );
 
   const allOn = activeCategories.length === ALL_CATEGORIES.length;
 

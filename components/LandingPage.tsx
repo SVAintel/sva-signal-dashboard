@@ -45,17 +45,8 @@ export default function LandingPage() {
         </p>
 
         {/* Description */}
-        <p className="mb-8 text-sm text-slate-500 leading-relaxed">
+        <p className="mb-10 text-sm text-slate-500 leading-relaxed">
           Real-time global intelligence aggregation platform.
-          <br />
-          Geopolitical analysis • Market signals • Disaster tracking • Conflict intelligence
-        </p>
-
-        {/* Map layers & datasets */}
-        <p className="mb-8 text-[10px] text-slate-500 leading-relaxed">
-          <span className="text-slate-400">Map Layers:</span> Live Signal Feed • Trade Routes • Conflict
-          Zones • Ports • Naval Vessels • Submarine Cables • Oil &amp; Gas Pipelines • Military Bases
-          (U.S. &amp; non-U.S.) • Wildfires • Tropical Storms • Country Borders &amp; Intel Profiles
         </p>
 
         {/* Enter Button */}
@@ -73,18 +64,7 @@ export default function LandingPage() {
         </button>
 
         {/* Bottom detail text */}
-        <div className="mt-16 space-y-2 text-[10px] text-slate-600 uppercase tracking-wider">
-          <p>
-            Data Sources: RSS Think Tanks (RAND, CSIS, Brookings, Atlantic Council, Carnegie, Crisis Group,
-            Stratfor, AEI) • Alpha Vantage • USGS • GDELT • ACLED • CoinGecko • EMSC • NOAA NHC • NASA FIRMS •
-            Frankfurter FX
-          </p>
-          <p>
-            Categories: War • Counter-Terrorism • Natural Disaster • Market • Biological • Political Unrest •
-            Cyber • Nuclear • Energy • Humanitarian
-          </p>
-          <p>Updating: Real-time</p>
-        </div>
+        <p className="mt-16 text-[10px] text-slate-600 uppercase tracking-wider">Updating: Real-time</p>
       </div>
 
       {/* Decorative elements */}
