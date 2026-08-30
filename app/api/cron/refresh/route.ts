@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Naval refresh forwarded below can take up to ~100s (90s AIS collection
+// window + FleetLeaks fetch) — raise this route's own limit well past that,
+// matching /api/naval's maxDuration=100 (Hobby plan supports up to 300s).
+export const maxDuration = 120;
+
 // Vercel Cron (Hobby plan: once/day max) hits this route on a fixed schedule
 // (see vercel.json) to proactively refresh the signals/news data caches at a
 // known, low-traffic time — instead of relying purely on user-triggered
@@ -51,9 +56,27 @@ export async function GET(req: NextRequest) {
     console.error("[cron/refresh] country-staleness check failed:", error);
   }
 
+  // Naval AIS + FleetLeaks sanctioned-vessel scan is intentionally NOT in the
+  // `targets` list above — an ordinary GET to /api/naval never blocks (it's
+  // an instant cache read), so it needs the same `refresh=1` + CRON_SECRET
+  // trigger the country-staleness check uses, and it's awaited on its own
+  // (rather than via Promise.allSettled with the fast routes above) since it
+  // can take up to ~100s to complete.
+  let navalRefreshOk = false;
+  try {
+    const navalRes = await fetch(`${origin}/api/naval?refresh=1`, {
+      cache: "no-store",
+      headers: authHeader ? { authorization: authHeader } : undefined,
+    });
+    navalRefreshOk = navalRes.ok;
+  } catch (error) {
+    console.error("[cron/refresh] naval refresh failed:", error);
+  }
+
   return NextResponse.json({
     refreshed: summary,
     countryStalenessCheckOk: stalenessCheckOk,
+    navalRefreshOk,
     timestamp: new Date().toISOString(),
   });
 }

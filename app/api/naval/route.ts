@@ -228,7 +228,7 @@ async function fetchSanctionedRussianVessels(): Promise<NavalVessel[]> {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   if (!AISSTREAM_API_KEY) {
     return NextResponse.json({ vessels: [], note: "AISSTREAM_API_KEY not configured" });
   }
@@ -237,7 +237,26 @@ export async function GET() {
     g.__navalCache = await readCacheFromDb();
   }
 
-  await ensureRefreshLoopStarted();
+  // Vercel serverless functions freeze/tear down the process right after a
+  // response is sent, so the setTimeout-based self-scheduling loop below
+  // only ever actually fires on a long-lived local dev process — in
+  // production it silently never runs, leaving the cache empty forever.
+  // Vercel Cron (see vercel.json + app/api/cron/refresh) is the real trigger
+  // in production: it hits this route once/day with a `refresh=1` query
+  // param + the shared CRON_SECRET, which forces a synchronous, awaited
+  // refresh within that single invocation (maxDuration=100 covers the ~90s
+  // AIS window + FleetLeaks fetch). Regular user page loads never hit this
+  // branch, so they always get an instant cache read.
+  const url = new URL(req.url);
+  const isCronRefresh =
+    url.searchParams.get("refresh") === "1" &&
+    !!process.env.CRON_SECRET &&
+    req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  if (isCronRefresh) {
+    await runRefresh();
+  } else {
+    await ensureRefreshLoopStarted();
+  }
 
   const cache = g.__navalCache;
   const ageMs = cache ? Date.now() - cache.ts : null;
