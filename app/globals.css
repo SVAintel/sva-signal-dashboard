@@ -76,6 +76,24 @@ body {
   animation: marker-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* All markers of a given category share one static L.DivIcon HTML template
+   (see makeIcon() in WorldMap.tsx), so every marker's pulse-ring starts with
+   identical DOM/animation state — they all restart their 2s pulse in lockstep
+   every ~2 seconds. With 70+ markers on screen, that's a synchronized style
+   recalc/repaint burst hitting the whole page at once (visible even in
+   unrelated content like embedded video), not a smooth continuous cost.
+   Spreading markers across a handful of negative animation-delay offsets
+   (a common "desync a swarm of identical CSS animations" trick) staggers
+   those restarts across the full 2s cycle instead of bunching them, with
+   zero runtime cost and no visual difference to any single marker. */
+.leaflet-marker-icon:nth-of-type(7n) .marker-pulse-ring { animation-delay: -0.14s; }
+.leaflet-marker-icon:nth-of-type(7n + 1) .marker-pulse-ring { animation-delay: -0.42s; }
+.leaflet-marker-icon:nth-of-type(7n + 2) .marker-pulse-ring { animation-delay: -0.71s; }
+.leaflet-marker-icon:nth-of-type(7n + 3) .marker-pulse-ring { animation-delay: -1.0s; }
+.leaflet-marker-icon:nth-of-type(7n + 4) .marker-pulse-ring { animation-delay: -1.28s; }
+.leaflet-marker-icon:nth-of-type(7n + 5) .marker-pulse-ring { animation-delay: -1.57s; }
+.leaflet-marker-icon:nth-of-type(7n + 6) .marker-pulse-ring { animation-delay: -1.85s; }
+
 /* Invisible enlarged click/tap target laid over small event marker icons.
    The visible dot stays tiny/unchanged; this transparent, absolutely-
    positioned box just gives pointer input a much bigger hit area so a
@@ -159,14 +177,13 @@ body {
    a CSS transform:scale, so the border stays a constant thin hairline (like
    the radar sweep line) instead of visually thickening as it grows. */
 .event-ping-ring {
-  border-radius: 50%;
-  border-style: solid;
-  border-color: #d4b36a;
+  stroke: #d4b36a;
+  stroke-width: 1;
   /* Same glow strength as the radar sweep line's halo (see the sweep bar's
      boxShadow in WorldMap.tsx) so the ping rings read as part of the same
-     radar visual language. */
-  box-shadow: 0 0 16px 3px rgba(212, 179, 106, 0.6);
-  will-change: width, height, opacity;
+     radar visual language. drop-shadow is the SVG-compatible equivalent of
+     box-shadow, applied to the circle's rendered stroke. */
+  filter: drop-shadow(0 0 6px rgba(212, 179, 106, 0.6));
 }
 
 /* Indeterminate progress bar shown in the "Initializing Data…" overlay while

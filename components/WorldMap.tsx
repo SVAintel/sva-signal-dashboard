@@ -418,13 +418,12 @@ const RING_COUNT = 4;
 const RING_STAGGER_MS = 420; // significantly slower stagger between rings
 const RING_START_SIZE = 16;
 const RING_GROW_MS = 3200; // significantly slower expand/fade per ring
-const RING_BORDER_PX = 1; // constant hairline thickness, independent of ring size
 
 const EventPingRings = memo(function EventPingRings({ event }: { event: Event | null }) {
   const map = useMap();
   const anchorRef = useRef<HTMLDivElement>(null);
   const [pane, setPane] = useState<HTMLElement | null>(null);
-  const ringElRefs = useRef(new Map<string, HTMLDivElement>());
+  const ringElRefs = useRef(new Map<string, SVGCircleElement>());
   const [rings, setRings] = useState<
     { id: string; x: number; y: number; maxSize: number; startAt: number }[]
   >([]);
@@ -479,10 +478,11 @@ const EventPingRings = memo(function EventPingRings({ event }: { event: Event | 
           const eased = 1 - Math.pow(1 - t, 3);
           const size = RING_START_SIZE + (r.maxSize - RING_START_SIZE) * eased;
           const opacity = Math.max(0, 0.7 * (1 - t));
-          el.style.width = `${size}px`;
-          el.style.height = `${size}px`;
-          el.style.left = `${r.x - size / 2}px`;
-          el.style.top = `${r.y - size / 2}px`;
+          // SVG attribute writes (not CSS layout properties) — cheap, scoped
+          // to this shape only, no full-page reflow.
+          el.setAttribute("r", String(size / 2));
+          el.setAttribute("cx", String(r.x));
+          el.setAttribute("cy", String(r.y));
           el.style.opacity = `${opacity}`;
         });
       }
@@ -532,25 +532,31 @@ const EventPingRings = memo(function EventPingRings({ event }: { event: Event | 
 
   return createPortal(
     <div ref={anchorRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
-      {rings.map((r) => (
-        <div
-          key={r.id}
-          ref={(el) => {
-            if (el) ringElRefs.current.set(r.id, el);
-            else ringElRefs.current.delete(r.id);
-          }}
-          className="event-ping-ring"
-          style={{
-            position: "absolute",
-            left: r.x - RING_START_SIZE / 2,
-            top: r.y - RING_START_SIZE / 2,
-            width: RING_START_SIZE,
-            height: RING_START_SIZE,
-            borderWidth: RING_BORDER_PX,
-            opacity: 0,
-          }}
-        />
-      ))}
+      {/* Rendered as SVG circles rather than bordered divs: changing an SVG
+          circle's `r`/`cx`/`cy` attributes only invalidates that shape inside
+          the SVG's own render tree, whereas animating a div's width/height/
+          left/top every frame forces a full-page layout reflow (expensive,
+          and the likely cause of "click an event and it gets laggy"). SVG's
+          stroke-width is independent of radius by design, so the ring's
+          border still stays a constant hairline as it grows — same visual
+          result as the old width/height approach, far cheaper to animate. */}
+      <svg style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }} width={1} height={1}>
+        {rings.map((r) => (
+          <circle
+            key={r.id}
+            ref={(el) => {
+              if (el) ringElRefs.current.set(r.id, el);
+              else ringElRefs.current.delete(r.id);
+            }}
+            className="event-ping-ring"
+            cx={r.x}
+            cy={r.y}
+            r={RING_START_SIZE / 2}
+            fill="none"
+            opacity={0}
+          />
+        ))}
+      </svg>
     </div>,
     pane
   );
