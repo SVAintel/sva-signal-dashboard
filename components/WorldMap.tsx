@@ -1,6 +1,6 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, GeoJSON, Tooltip, useMap, AttributionControl } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Tooltip, useMap, AttributionControl } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
@@ -82,8 +82,8 @@ const militaryBaseIcon = new L.DivIcon({
 const majorMilitaryBaseIcon = new L.DivIcon({
   className: "",
   html: `<div style="position:relative;width:12px;height:12px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#d4b36a;"></div>
-    <div style="position:relative;width:12px;height:12px;border-radius:50%;background:#d4b36a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(212,179,106,0.9);"></div>
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#1f3d1a;"></div>
+    <div style="position:relative;width:12px;height:12px;border-radius:50%;background:#1f3d1a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(31,61,26,0.9);"></div>
   </div>`,
   iconSize: [12, 12],
   iconAnchor: [6, 6],
@@ -127,6 +127,25 @@ const stormIcon = (classification: string) => {
     iconSize: [22, 22],
     iconAnchor: [11, 11],
   });
+};
+
+// GPS/GNSS jamming marker: a real geographic-radius circle (meters, via
+// Leaflet's Circle) rather than a fixed-pixel DivIcon — an H3 res-4 cell is
+// roughly ~25km across, so rendering it at true scale means the marker
+// naturally shrinks to a small dot when zoomed out (world view) and reads as
+// a proper region-sized patch when zoomed in, instead of a fixed-pixel blob
+// that blankets the whole map at low zoom. Deliberately a different hue from
+// wildfires (orange) and storms (red/amber) since all three can be layered
+// on simultaneously.
+const GPS_JAM_RADIUS_METERS = { medium: 22000, high: 30000 };
+const gpsJamStyle = (level: "medium" | "high") => {
+  const color = level === "high" ? "#a855f7" : "#c4b5fd";
+  return {
+    color,
+    weight: 0,
+    fillColor: color,
+    fillOpacity: level === "high" ? 0.55 : 0.35,
+  };
 };
 
 const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));
@@ -215,8 +234,8 @@ const portIcon = new L.DivIcon({
 const majorPortIcon = new L.DivIcon({
   className: "",
   html: `<div style="position:relative;width:13px;height:13px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#d4b36a;"></div>
-    <div style="position:relative;width:13px;height:13px;border-radius:50%;background:#d4b36a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(212,179,106,0.9);"></div>
+    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#1e3a8a;"></div>
+    <div style="position:relative;width:13px;height:13px;border-radius:50%;background:#1e3a8a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(30,58,138,0.9);"></div>
   </div>`,
   iconSize: [13, 13],
   iconAnchor: [6, 6],
@@ -232,6 +251,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  gpsJamming: boolean;
   fleetTracker: boolean;
   countries: boolean;
 }
@@ -270,6 +290,16 @@ interface Storm {
   movementSpeed: number | null;
   advisoryUrl: string | null;
   lastUpdate: string | null;
+}
+
+interface GpsJamHex {
+  h3: string;
+  lat: number;
+  lng: number;
+  level: "medium" | "high";
+  pct: number;
+  affectedAircraft: number;
+  totalAircraft: number;
 }
 
 interface ConflictZoneOutput extends ConflictZoneData {}
@@ -1004,6 +1034,33 @@ function MapCountryFocuser({ feature }: { feature: CountryFeature | null }) {
   return null;
 }
 
+// Flies the map to fit a selected conflict zone's shape and zooms in,
+// mirroring MapCountryFocuser. Conflict zones are always a single
+// contiguous region (no disjoint overseas-territory case like countries),
+// so this just fits the combined bounds of the whole MultiPolygon.
+function MapConflictZoneFocuser({ zone }: { zone: ConflictZoneOutput | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (zone) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const bounds = L.geoJSON(zone.geometry as any).getBounds();
+      if (bounds.isValid()) {
+        map.flyToBounds(bounds, { duration: 0.9, padding: [40, 40], maxZoom: 6 });
+      }
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [zone?.id, map]);
+
+  return null;
+}
+
 export default function WorldMap({
   events,
   selectedEvent,
@@ -1013,7 +1070,9 @@ export default function WorldMap({
   navalVessels = [],
   wildfires = [],
   storms = [],
+  gpsJamHexes = [],
   onSelectConflictZone,
+  selectedConflictZone = null,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
   fleetGroups = [],
@@ -1033,7 +1092,9 @@ export default function WorldMap({
   navalVessels?: NavalVessel[];
   wildfires?: Wildfire[];
   storms?: Storm[];
+  gpsJamHexes?: GpsJamHex[];
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
+  selectedConflictZone?: ConflictZoneOutput | null;
   selectedMilitaryBase?: MilitaryBaseData | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
   fleetGroups?: FleetGroup[];
@@ -1082,6 +1143,8 @@ export default function WorldMap({
   const portMarkerRefs = useRef(new Map<string, L.Marker>());
   // Same purpose again, but for country border GeoJSON layers.
   const countryLayerRefs = useRef(new Map<string, L.GeoJSON>());
+  // Same purpose again, but for conflict zone GeoJSON layers.
+  const conflictZoneLayerRefs = useRef(new Map<string, L.GeoJSON>());
   // Look up the selected country's GeoJSON feature (for MapCountryFocuser to
   // fly/zoom to) — memoized so its identity is stable unless the selection
   // or the loaded feature set actually changes.
@@ -1110,10 +1173,13 @@ export default function WorldMap({
       <MapFleetGroupFocuser group={selectedFleetGroup} />
       <MapPortFocuser port={selectedPort} />
       <MapCountryFocuser feature={selectedCountryFeature} />
+      <MapConflictZoneFocuser zone={selectedConflictZone} />
       <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
       <TileLayer
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
-        attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+        url={`https://basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}${
+          typeof window !== "undefined" && window.devicePixelRatio > 1 ? "@2x" : ""
+        }.png?key=${process.env.NEXT_PUBLIC_CARTO_API_KEY || ""}`}
+        attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         noWrap={true}
       />
       {activeLayers.countries &&
@@ -1199,11 +1265,44 @@ export default function WorldMap({
                   key={zone.id}
                   data={{ type: "Feature", properties: {}, geometry: zone.geometry } as any}
                   style={{ color, weight: 1.5, fillColor: color, fillOpacity: 0.16 }}
-                  eventHandlers={{
-                    click: () => onSelectConflictZone?.(zone),
+                  ref={(layer) => {
+                    if (layer) conflictZoneLayerRefs.current.set(zone.id, layer);
+                    else conflictZoneLayerRefs.current.delete(zone.id);
                   }}
                 >
-                  <Tooltip sticky>{`${zone.name} (click to expand)`}</Tooltip>
+                  <Popup className="tactical-popup">
+                    <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+                      <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                        Conflict Zone • {zone.intensity}
+                      </div>
+                      <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{zone.name}</div>
+                      <button
+                        onClick={() => {
+                          // Close the popup immediately — the map is about to
+                          // fly/zoom in on this zone and the side detail
+                          // panel takes over as the source of truth.
+                          conflictZoneLayerRefs.current.get(zone.id)?.closePopup();
+                          onSelectConflictZone?.(zone);
+                        }}
+                        style={{
+                          marginTop: "8px",
+                          width: "100%",
+                          border: "1px solid #3a3a3a",
+                          background: "#1e1e1e",
+                          color: "#d4b36a",
+                          borderRadius: "4px",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          padding: "6px 8px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </Popup>
                 </GeoJSON>
               );
             })
@@ -1439,6 +1538,20 @@ export default function WorldMap({
               }`}
             </Tooltip>
           </Marker>
+        ))}
+
+      {activeLayers.gpsJamming &&
+        gpsJamHexes.map((hex) => (
+          <Circle
+            key={hex.h3}
+            center={[hex.lat, hex.lng]}
+            radius={GPS_JAM_RADIUS_METERS[hex.level]}
+            pathOptions={gpsJamStyle(hex.level)}
+          >
+            <Tooltip>
+              {`📡 GPS Jamming — ${hex.level === "high" ? "High" : "Medium"} (${hex.pct}% of ${hex.totalAircraft} aircraft affected)`}
+            </Tooltip>
+          </Circle>
         ))}
 
       {events.map((event) => (

@@ -43,6 +43,7 @@ interface MapLayers {
   militaryBases: boolean;
   wildfires: boolean;
   storms: boolean;
+  gpsJamming: boolean;
   fleetTracker: boolean;
   countries: boolean;
 }
@@ -135,6 +136,16 @@ interface Storm {
   lastUpdate: string | null;
 }
 
+interface GpsJamHex {
+  h3: string;
+  lat: number;
+  lng: number;
+  level: "medium" | "high";
+  pct: number;
+  affectedAircraft: number;
+  totalAircraft: number;
+}
+
 interface CableFeature {
   id: string;
   name: string;
@@ -181,7 +192,7 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "naval" | "wildfire" | "storm";
+  kind: "naval" | "wildfire" | "storm" | "gpsJam";
   lat: number;
   lng: number;
   color: string;
@@ -457,6 +468,7 @@ export default function GlobeMap({
   navalVessels = [],
   wildfires = [],
   storms = [],
+  gpsJamHexes = [],
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
@@ -477,6 +489,7 @@ export default function GlobeMap({
   navalVessels?: NavalVessel[];
   wildfires?: Wildfire[];
   storms?: Storm[];
+  gpsJamHexes?: GpsJamHex[];
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
   selectedMilitaryBase?: MilitaryBaseFeature | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
@@ -928,14 +941,31 @@ export default function GlobeMap({
       );
     }
 
+    if (activeLayers.gpsJamming) {
+      layerPoints.push(
+        ...gpsJamHexes.map((hex) => ({
+          id: `gpsjam-${hex.h3}`,
+          kind: "gpsJam" as const,
+          lat: hex.lat,
+          lng: hex.lng,
+          color: hex.level === "high" ? "#a855f7" : "#c4b5fd",
+          radius: hex.level === "high" ? 0.3 : 0.2,
+          altitude: FLAT_ALTITUDE,
+          label: `📡 GPS Jamming — ${hex.level === "high" ? "High" : "Medium"} (${hex.pct}% of ${hex.totalAircraft} aircraft affected)`,
+        }))
+      );
+    }
+
     return [...layerPoints];
   }, [
     activeLayers.navalVessels,
     activeLayers.storms,
     activeLayers.wildfires,
+    activeLayers.gpsJamming,
     navalVessels,
     storms,
     wildfires,
+    gpsJamHexes,
   ]);
 
   // Event markers use HTML overlays (not WebGL points) so they render as
@@ -964,7 +994,7 @@ export default function GlobeMap({
           lat: base.lat,
           lng: base.lng,
           altitude: FLAT_ALTITUDE,
-          color: base.isMajor ? "#d4b36a" : "#6b7d3d",
+          color: base.isMajor ? "#1f3d1a" : "#6b7d3d",
           size: base.isMajor ? 12 : 9,
           label: `🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}${base.isMajor ? " ★" : ""}`,
           kind: "militaryBase",
@@ -996,7 +1026,7 @@ export default function GlobeMap({
           lat: port.lat,
           lng: port.lng,
           altitude: FLAT_ALTITUDE,
-          color: port.isMajor ? "#d4b36a" : "#93c5fd",
+          color: port.isMajor ? "#1e3a8a" : "#93c5fd",
           size: port.isMajor ? 13 : 9,
           label: `⚓ ${port.displayName}${port.country ? ` (${port.country})` : ""}${port.isMajor ? " ★" : ""}`,
           kind: "port",

@@ -56,6 +56,7 @@ type MapLayerKey =
   | "militaryBases"
   | "wildfires"
   | "storms"
+  | "gpsJamming"
   | "fleetTracker"
   | "countries";
 type MapLayerData = {
@@ -98,6 +99,15 @@ type Storm = {
   movementSpeed: number | null;
   advisoryUrl: string | null;
   lastUpdate: string | null;
+};
+type GpsJamHex = {
+  h3: string;
+  lat: number;
+  lng: number;
+  level: "medium" | "high";
+  pct: number;
+  affectedAircraft: number;
+  totalAircraft: number;
 };
 
 export default function Dashboard() {
@@ -142,6 +152,8 @@ export default function Dashboard() {
   const [wildfiresLoading, setWildfiresLoading] = useState(false);
   const [storms, setStorms] = useState<Storm[]>([]);
   const [stormsLoading, setStormsLoading] = useState(false);
+  const [gpsJamHexes, setGpsJamHexes] = useState<GpsJamHex[]>([]);
+  const [gpsJamLoading, setGpsJamLoading] = useState(false);
   const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
   const [fleetLoading, setFleetLoading] = useState(false);
   const [fleetLastChecked, setFleetLastChecked] = useState<string>("");
@@ -161,6 +173,7 @@ export default function Dashboard() {
     militaryBases: false,
     wildfires: false,
     storms: false,
+    gpsJamming: false,
     fleetTracker: false,
     countries: true,
   });
@@ -390,6 +403,27 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [activeLayers.storms]);
 
+  // GPS/GNSS Jamming: gpsjam.org daily H3-hex interference feed (ADS-B
+  // Exchange derived), server-parsed and cached for 6h. The upstream data
+  // itself only refreshes once/day, so a long poll interval is plenty.
+  useEffect(() => {
+    if (!activeLayers.gpsJamming) return;
+    const fetchGpsJamming = async () => {
+      try {
+        setGpsJamLoading(true);
+        const res = await axios.get("/api/gps-jamming");
+        setGpsJamHexes(res.data?.hexes || []);
+      } catch (error) {
+        console.error("Failed to fetch GPS jamming data:", error);
+      } finally {
+        setGpsJamLoading(false);
+      }
+    };
+    fetchGpsJamming();
+    const interval = setInterval(fetchGpsJamming, 60 * 60 * 1000); // 1h
+    return () => clearInterval(interval);
+  }, [activeLayers.gpsJamming]);
+
   // US Fleet Tracker: USNI News' weekly Fleet and Marine Tracker report,
   // scraped server-side (see app/api/fleet-tracker/route.ts) and cached for
   // 12h — USNI only publishes a new edition roughly weekly, so there's no
@@ -581,6 +615,7 @@ export default function Dashboard() {
     navalVessels: activeLayers.navalVessels ? navalVessels : [],
     wildfires: activeLayers.wildfires ? wildfires : [],
     storms: activeLayers.storms ? storms : [],
+    gpsJamHexes: activeLayers.gpsJamming ? gpsJamHexes : [],
     fleetGroups:
       activeLayers.fleetTracker
         ? fleetRegionFilter === "all"
@@ -588,6 +623,7 @@ export default function Dashboard() {
           : fleetGroups.filter((g) => g.id === fleetRegionFilter)
         : [],
     onSelectConflictZone: setSelectedConflictZone,
+    selectedConflictZone,
     selectedMilitaryBase,
     onSelectMilitaryBase: handleMilitaryBaseSelect,
     selectedFleetGroup,
@@ -611,6 +647,7 @@ export default function Dashboard() {
     ["militaryBases", "Military Bases"],
     ["wildfires", "Wildfires"],
     ["storms", "Storms"],
+    ["gpsJamming", "GPS Jamming"],
     ["fleetTracker", "US Fleet Tracker (USNI)"],
     ["countries", "Country Borders"],
   ];
@@ -623,6 +660,9 @@ export default function Dashboard() {
     }
     if (key === "storms" && activeLayers.storms) {
       return stormsLoading && storms.length === 0 ? "LOADING…" : `ON (${storms.length})`;
+    }
+    if (key === "gpsJamming" && activeLayers.gpsJamming) {
+      return gpsJamLoading && gpsJamHexes.length === 0 ? "LOADING…" : `ON (${gpsJamHexes.length})`;
     }
     if (key === "fleetTracker" && activeLayers.fleetTracker) {
       return fleetLoading && fleetGroups.length === 0 ? "LOADING…" : `ON (${fleetGroups.length})`;
@@ -1291,6 +1331,12 @@ export default function Dashboard() {
             port={selectedPort}
             onClose={() => setSelectedPort(null)}
           />
+
+          {/* Conflict Zone Detail Panel — docked to the right edge of the map, scrollable */}
+          <ConflictZoneDetailPanel
+            zone={selectedConflictZone}
+            onClose={() => setSelectedConflictZone(null)}
+          />
         </div>
 
         {/* Mobile-only: when the user is on the "Signals & Panels" tab (map is
@@ -1323,6 +1369,10 @@ export default function Dashboard() {
             <PortDetailPanel
               port={selectedPort}
               onClose={() => setSelectedPort(null)}
+            />
+            <ConflictZoneDetailPanel
+              zone={selectedConflictZone}
+              onClose={() => setSelectedConflictZone(null)}
             />
           </div>
         )}
@@ -1379,12 +1429,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Conflict Zone Detail Modal */}
-      <ConflictZoneDetailPanel
-        zone={selectedConflictZone}
-        onClose={() => setSelectedConflictZone(null)}
-      />
 
       {/* Initialization overlay — blurs the dashboard behind it while the
           first data fetch is in flight, then flips to a green "ready" state

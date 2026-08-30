@@ -3,6 +3,7 @@ import { Event } from "@/lib/types";
 import type { MilitaryBaseData } from "@/components/MilitaryBaseDetailPanel";
 import type { CountryData } from "@/components/CountryDetailPanel";
 import type { PortData } from "@/components/PortDetailPanel";
+import type { ConflictZoneData } from "@/components/ConflictZoneDetailPanel";
 import { ANALYTIC_TRADECRAFT_GUIDANCE } from "@/lib/analyst-guidance";
 import { getRecentEvents, type EventHistoryRow } from "@/lib/db";
 import { eventsForRegion } from "@/lib/region-match";
@@ -25,6 +26,7 @@ interface ChatRequestBody {
   militaryBase?: MilitaryBaseData;
   country?: CountryData;
   port?: PortData;
+  conflictZone?: ConflictZoneData;
   messages: ChatMessage[];
 }
 
@@ -62,22 +64,24 @@ export async function POST(req: Request) {
   const militaryBase = body?.militaryBase;
   const country = body?.country;
   const port = body?.port;
+  const conflictZone = body?.conflictZone;
   const messages = Array.isArray(body?.messages) ? body.messages : [];
 
   if (
     (!event || !event.title || !event.category || !event.description) &&
     (!militaryBase || !militaryBase.name) &&
     (!country || !country.name) &&
-    (!port || !port.name)
+    (!port || !port.name) &&
+    (!conflictZone || !conflictZone.name)
   ) {
-    return NextResponse.json({ error: "Missing event, military base, country, or port context." }, { status: 400 });
+    return NextResponse.json({ error: "Missing event, military base, country, port, or conflict zone context." }, { status: 400 });
   }
 
-  // Ground country/base/port answers in what's currently being tracked, not
-  // just the static curated context. Skipped for the single-event branch
+  // Ground country/base/port/zone answers in what's currently being tracked,
+  // not just the static curated context. Skipped for the single-event branch
   // since that event *is* the live signal already.
   let liveSignalsBlock = "";
-  const regionName = country?.name || militaryBase?.country || port?.country;
+  const regionName = country?.name || militaryBase?.country || port?.country || conflictZone?.countries?.[0];
   if (!event && regionName) {
     const recentEvents = await getRecentEvents(LIVE_SIGNAL_WINDOW_DAYS);
     const matched = eventsForRegion(recentEvents, regionName);
@@ -157,6 +161,29 @@ export async function POST(req: Request) {
           `- Annual throughput: ${port!.details.annualThroughput}\n` +
           `- Summary: ${port!.details.strategicNotes}\n`
         : `- Detailed cargo/throughput/chokepoint data is not curated for this port; rely on general knowledge.\n`)
+    : conflictZone
+    ? `You are an intelligence analyst assistant for Sovereign Veil Analytics. ` +
+      `Answer using the conflict zone context below PLUS your own general knowledge of the actors, region, and ` +
+      `historical/geopolitical background involved — do not ask the user to supply information themselves. ` +
+      `Figures given are public/unclassified approximations, not an authoritative casualty or order-of-battle ` +
+      `source; note that if relevant. If something falls outside both the given context and your knowledge, ` +
+      `briefly note that in passing rather than blocking on it. Keep responses practical and analyst-style, and ` +
+      `prioritize specific, concrete details — cite named actors, factions, locations, and figures rather than ` +
+      `vague generalities. Formatting: separate distinct topics/ideas into their own paragraphs with a blank ` +
+      `line between them so the answer is easy to scan. Let the number of paragraphs vary naturally with the ` +
+      `length and complexity of the answer — a quick factual question may only need one short paragraph, while ` +
+      `a broader question may need several. Do NOT pad with extra paragraph breaks just to hit a target count, ` +
+      `and do NOT shorten or omit substantive details to fit a paragraph.\n\n` +
+      ANALYTIC_TRADECRAFT_GUIDANCE +
+      liveSignalsBlock +
+      `Conflict zone context:\n` +
+      `- Name: ${conflictZone!.name}\n` +
+      `- Country/Region: ${conflictZone!.countries.join(", ")}\n` +
+      `- Intensity: ${conflictZone!.intensity}\n` +
+      `- Active since: ${conflictZone!.startYear}\n` +
+      `- Estimated casualties: ${conflictZone!.casualties}\n` +
+      `- Actors involved: ${conflictZone!.actors.join("; ")}\n` +
+      `- Summary: ${conflictZone!.description}\n`
     : `You are an intelligence analyst assistant for Sovereign Veil Analytics. ` +
       `Answer using the country context below PLUS your own general knowledge of its politics, economy, military, ` +
       `and regional relationships — do not ask the user to supply information themselves. Figures given are ` +
@@ -210,7 +237,7 @@ export async function POST(req: Request) {
                 {
                   text:
                     `${systemContext}\n\nConversation so far:\n` +
-                    `${chatTranscript || `User: Provide a brief initial assessment of this ${event ? "event" : militaryBase ? "installation" : port ? "port" : "country"}.`}\n\n` +
+                    `${chatTranscript || `User: Provide a brief initial assessment of this ${event ? "event" : militaryBase ? "installation" : port ? "port" : conflictZone ? "conflict zone" : "country"}.`}\n\n` +
                     `Now provide the assistant response.`,
                 },
               ],
