@@ -40,10 +40,14 @@ const icons: Record<string, L.DivIcon> = {
 // Naval vessel marker: a small square/diamond in slate-blue to visually
 // distinguish AIS-tracked ships from category event markers, with a heading
 // arrow when course data is available. Tankers reuse the same shapes in
-// amber (matching the oil pipeline color elsewhere) so the two vessel kinds
-// stay visually distinct at a glance.
-const navalIcon = (course: number | null, kind: "military" | "tanker") => {
-  const color = kind === "tanker" ? "#eab308" : "#7dd3fc";
+// amber (matching the oil pipeline color elsewhere), and sanctioned
+// Russia-flagged vessels (FleetLeaks) use red to visually flag them as a
+// distinct, higher-scrutiny category — so all three vessel kinds stay
+// visually distinct at a glance.
+const navalColor = (kind: "military" | "tanker" | "sanctioned") =>
+  kind === "tanker" ? "#eab308" : kind === "sanctioned" ? "#dc2626" : "#7dd3fc";
+const navalIcon = (course: number | null, kind: "military" | "tanker" | "sanctioned") => {
+  const color = navalColor(kind);
   return new L.DivIcon({
     className: "",
     html: `<div style="position:relative;width:14px;height:14px;transform:rotate(${course ?? 0}deg);">
@@ -55,8 +59,8 @@ const navalIcon = (course: number | null, kind: "military" | "tanker") => {
     iconAnchor: [7, 7],
   });
 };
-const navalIconNoHeading = (kind: "military" | "tanker") => {
-  const color = kind === "tanker" ? "#eab308" : "#7dd3fc";
+const navalIconNoHeading = (kind: "military" | "tanker" | "sanctioned") => {
+  const color = navalColor(kind);
   return new L.DivIcon({
     className: "",
     html: `<div style="width:10px;height:10px;background:${color};border:2px solid rgba(255,255,255,0.6);border-radius:2px;box-shadow:0 0 6px ${color};"></div>`,
@@ -264,7 +268,7 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
-  kind: "military" | "tanker";
+  kind: "military" | "tanker" | "sanctioned";
 }
 
 interface Wildfire {
@@ -1377,7 +1381,7 @@ export default function WorldMap({
             icon={vessel.course !== null ? navalIcon(vessel.course, vessel.kind) : navalIconNoHeading(vessel.kind)}
           >
             <Tooltip>
-              {`${vessel.kind === "tanker" ? "🛢️" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`}
+              {`${vessel.kind === "tanker" ? "🛢️" : vessel.kind === "sanctioned" ? "🚫" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}${vessel.kind === "sanctioned" ? " (sanctioned, RU-flagged)" : ""}`}
             </Tooltip>
           </Marker>
         ))}

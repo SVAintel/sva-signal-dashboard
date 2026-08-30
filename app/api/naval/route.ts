@@ -19,7 +19,7 @@ const AISSTREAM_API_KEY = process.env.AISSTREAM_API_KEY || "";
 // less often than position reports (every few seconds). A short window
 // reliably sees plenty of positions but almost never catches a matching
 // static-data message for the same ship, so real military-flagged vessels
-// were being missed entirely. The user opted into a 30-min refresh cadence
+// were being missed entirely. The user opted into a daily refresh cadence
 // for this layer specifically to allow a much longer collection window,
 // giving a realistic chance of pairing a position with its static data.
 const COLLECT_WINDOW_MS = 90000;
@@ -37,10 +37,10 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
-  kind: "military" | "tanker";
+  kind: "military" | "tanker" | "sanctioned";
 }
 
-const CACHE_MS = 30 * 60 * 1000; // 30 minutes — matches the client polling interval
+const CACHE_MS = 24 * 60 * 60 * 1000; // 24 hours — background refresh cadence; client just polls this cache (never blocks on a live scan)
 const CACHE_KEY = "naval";
 
 type NavalCache = { data: NavalVessel[]; ts: number; outage?: boolean };
@@ -173,6 +173,61 @@ async function collectNavalVessels(): Promise<{ vessels: NavalVessel[]; outage: 
   });
 }
 
+// FleetLeaks (fleetleaks.com) aggregates official OFAC/EU/UK/Canada/Australia/
+// NZ sanctions designations with live AIS positions — free, no-auth, public
+// REST endpoint. Filtered here to Russia-flagged vessels (the "shadow fleet"
+// oil tankers and cargo ships evading sanctions) as a distinct third vessel
+// kind alongside the existing military/tanker AIS categories. Best-effort:
+// any failure here must never break the existing AISStream-derived vessels.
+const FLEETLEAKS_URL = "https://fleetleaks.com/wp-json/fleetleaks/v1/vessels/map-data";
+
+interface FleetLeaksVessel {
+  imo: string;
+  name: string;
+  flag: string;
+  latitude: string;
+  longitude: string;
+  speed_knots: string;
+  course_degrees: string;
+}
+
+async function fetchSanctionedRussianVessels(): Promise<NavalVessel[]> {
+  try {
+    const res = await fetch(FLEETLEAKS_URL, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SVASignalDashboard/1.0)" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as FleetLeaksVessel[];
+    if (!Array.isArray(data)) return [];
+
+    const out: NavalVessel[] = [];
+    for (const v of data) {
+      if (v.flag !== "Russia") continue;
+      const lat = Number(v.latitude);
+      const lng = Number(v.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const speed = Number(v.speed_knots);
+      const course = Number(v.course_degrees);
+      out.push({
+        mmsi: `imo-${v.imo}`, // FleetLeaks keys by IMO, not MMSI — prefixed to avoid colliding with real MMSI keys
+        name: v.name || `IMO ${v.imo}`,
+        lat,
+        lng,
+        course: Number.isFinite(course) ? course : null,
+        speed: Number.isFinite(speed) ? speed : null,
+        shipType: null,
+        kind: "sanctioned",
+      });
+    }
+    console.log(`[naval] FleetLeaks: ${out.length} Russia-flagged sanctioned vessels`);
+    return out;
+  } catch (error) {
+    console.error("[naval] FleetLeaks fetch failed (non-fatal):", error);
+    return [];
+  }
+}
+
 export async function GET() {
   if (!AISSTREAM_API_KEY) {
     return NextResponse.json({ vessels: [], note: "AISSTREAM_API_KEY not configured" });
@@ -199,8 +254,11 @@ async function runRefresh() {
   if (g.__navalRefreshing) return;
   g.__navalRefreshing = true;
   try {
-    const { vessels, outage } = await collectNavalVessels();
-    const cache: NavalCache = { data: vessels, ts: Date.now(), outage };
+    const [{ vessels, outage }, sanctionedVessels] = await Promise.all([
+      collectNavalVessels(),
+      fetchSanctionedRussianVessels(),
+    ]);
+    const cache: NavalCache = { data: [...vessels, ...sanctionedVessels], ts: Date.now(), outage };
     g.__navalCache = cache;
     await writeCacheToDb(cache);
   } catch (error) {

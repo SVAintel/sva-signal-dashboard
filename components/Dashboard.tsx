@@ -75,7 +75,7 @@ type NavalVessel = {
   course: number | null;
   speed: number | null;
   shipType: number | null;
-  kind: "military" | "tanker";
+  kind: "military" | "tanker" | "sanctioned";
 };
 type Wildfire = {
   lat: number;
@@ -337,11 +337,11 @@ export default function Dashboard() {
   // tanker-flagged ships only, sparse coverage) — only poll it while the
   // layer is actually toggled on, since each request opens a short-lived
   // upstream WebSocket connection. Server now self-refreshes the AIS scan
-  // every 30 min in the background and persists results to disk (see
+  // once a day in the background and persists results to Postgres (see
   // app/api/naval/route.ts) — GET here is an instant read of that cache,
-  // never a live 90s scan. Poll frequently so the "SCANNING…" status and
-  // vessel count update promptly once a background refresh completes,
-  // without any cost since reads are cheap.
+  // never a live 90s scan, so users never wait on page load. Poll frequently
+  // so the "SCANNING…" status and vessel count update promptly once a
+  // background refresh completes, without any cost since reads are cheap.
   useEffect(() => {
     if (!activeLayers.navalVessels) return;
     const fetchNaval = async () => {
@@ -1025,8 +1025,10 @@ export default function Dashboard() {
                         </span>
                       ) : (
                         <>
-                          AIS scan takes ~90s per refresh (every 30 min). Military-flagged and
-                          tanker-flagged vessels are rare — 0 results on a given scan is expected.
+                          Data refreshes once daily in the background — shown instantly from
+                          cache, no waiting. Military-flagged and tanker-flagged vessels are
+                          rare — 0 results on a given scan is expected. Red markers are
+                          sanctioned Russia-flagged vessels (FleetLeaks).
                         </>
                       )}
                       {navalLastChecked && ` Last checked: ${navalLastChecked}.`}

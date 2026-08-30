@@ -108,7 +108,7 @@ interface NavalVessel {
   course: number | null;
   speed: number | null;
   shipType: number | null;
-  kind: "military" | "tanker";
+  kind: "military" | "tanker" | "sanctioned";
 }
 
 interface Wildfire {
@@ -903,10 +903,10 @@ export default function GlobeMap({
           kind: "naval" as const,
           lat: vessel.lat,
           lng: vessel.lng,
-          color: vessel.kind === "tanker" ? "#eab308" : "#7dd3fc",
+          color: vessel.kind === "tanker" ? "#eab308" : vessel.kind === "sanctioned" ? "#dc2626" : "#7dd3fc",
           radius: 0.18,
           altitude: FLAT_ALTITUDE,
-          label: `${vessel.kind === "tanker" ? "🛢️" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
+          label: `${vessel.kind === "tanker" ? "🛢️" : vessel.kind === "sanctioned" ? "🚫" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
         }))
       );
     }
