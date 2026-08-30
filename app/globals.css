@@ -18,16 +18,19 @@ body {
 
 /* Leaflet's default attribution control is a light gray pill with a black
    text link — restyle it to match the dashboard's dark/gold aesthetic
-   instead of standing out as an unstyled default control. */
+   instead of standing out as an unstyled default control. Deliberately no
+   backdrop-filter here: it sits directly over the map, and a live blur
+   would force the browser to recompute it every frame the radar sweep
+   animates underneath — a real perf cost for a purely cosmetic touch.
+   Solid semi-transparent background reads fine without that cost. */
 .leaflet-control-attribution {
-  background: rgba(10, 10, 10, 0.65) !important;
+  background: rgba(10, 10, 10, 0.75) !important;
   color: #52525b !important;
   font-size: 9px !important;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   padding: 2px 6px !important;
   border-radius: 3px;
-  backdrop-filter: blur(2px);
 }
 
 .leaflet-control-attribution a {

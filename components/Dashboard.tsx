@@ -18,6 +18,8 @@ import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
 import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
 import axios from "axios";
+import { useSession } from "next-auth/react";
+import AuthWidget from "./AuthWidget";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 const GlobeMap = dynamic(() => import("./GlobeMap"), { ssr: false });
@@ -184,6 +186,60 @@ export default function Dashboard() {
   const [ambientPlaying, setAmbientPlaying] = useState(false);
   const [ambientVolume, setAmbientVolume] = useState(0.4);
   const dragStateRef = useRef<{ startPos: number; startSize: number } | null>(null);
+
+  // --- Signed-in preference persistence -----------------------------------
+  // Optional: the dashboard is fully usable signed-out (all state below still
+  // works, just resets on reload). When signed in, we hydrate a handful of
+  // "layout/filter" preferences from the server once per sign-in, then
+  // debounce-save them back whenever they change. Deliberately NOT persisting
+  // ambientPlaying (autoplay-policy-gated; shouldn't force audio on reload)
+  // or anything view-selection-y that should reset per visit (selected
+  // event/panel, active tab, etc.) — just the "how I like my dashboard set up"
+  // preferences.
+  const { status: sessionStatus } = useSession();
+  const prefsHydratedRef = useRef(false);
+  const skipNextPrefsSaveRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionStatus !== "authenticated" || prefsHydratedRef.current) return;
+    prefsHydratedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/prefs");
+        if (!res.ok) return;
+        const { prefs } = await res.json();
+        if (!prefs || typeof prefs !== "object") return;
+        // Applying hydrated values triggers the save-effect below; skip that
+        // one save so we don't immediately re-write back what we just read.
+        skipNextPrefsSaveRef.current = true;
+        if (Array.isArray(prefs.activeCategories)) setAllCategories(prefs.activeCategories);
+        if (prefs.activeTimeRangeHours !== undefined) setActiveTimeRangeHours(prefs.activeTimeRangeHours);
+        if (typeof prefs.sidebarWidth === "number") setSidebarWidth(prefs.sidebarWidth);
+        if (typeof prefs.ambientVolume === "number") setAmbientVolume(prefs.ambientVolume);
+      } catch {
+        // Best-effort — dashboard works fine without persisted prefs.
+      }
+    })();
+  }, [sessionStatus, setAllCategories, setActiveTimeRangeHours]);
+
+  useEffect(() => {
+    if (sessionStatus !== "authenticated") return;
+    if (skipNextPrefsSaveRef.current) {
+      skipNextPrefsSaveRef.current = false;
+      return;
+    }
+    const id = setTimeout(() => {
+      fetch("/api/prefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeCategories, activeTimeRangeHours, sidebarWidth, ambientVolume }),
+      }).catch(() => {
+        // Best-effort — a failed save just means prefs won't stick this time.
+      });
+    }, 800);
+    return () => clearTimeout(id);
+  }, [sessionStatus, activeCategories, activeTimeRangeHours, sidebarWidth, ambientVolume]);
+
 
   const handleDragMove = useCallback((e: MouseEvent) => {
     const drag = dragStateRef.current;
@@ -667,6 +723,7 @@ export default function Dashboard() {
             volume={ambientVolume}
             onVolumeChange={setAmbientVolume}
           />
+          <AuthWidget />
         </div>
       </header>
 

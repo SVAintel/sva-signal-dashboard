@@ -631,7 +631,23 @@ function ScanSweep({
 
   useEffect(() => {
     let raf: number;
-    let start: number | null = null;
+    let lastFrameT: number | null = null;
+    // Accumulated progress (0..1), advanced incrementally each frame by
+    // elapsed delta-time rather than derived from `(now - start) % duration`.
+    // The wall-clock-modulo approach looks perfectly smooth in isolation, but
+    // any main-thread stall (a burst of React re-renders from flash state
+    // updates, a GC pause, etc.) causes the *next* frame's elapsed-time to
+    // have jumped by however long the stall lasted — so the bar visibly
+    // teleports forward to "catch up" the instant rendering resumes. Since
+    // progress here is accumulated frame-by-frame instead, a stall just
+    // results in a brief pause; the sweep resumes from exactly where it
+    // paused instead of snapping ahead.
+    let progress = 0;
+    // Cap how much a single frame can advance progress by, so a large stall
+    // (e.g. a slow re-render) still can't produce a big visible jump — worst
+    // case the sweep is very slightly slower during heavy load, which is far
+    // less noticeable than a jump.
+    const MAX_FRAME_MS = 100;
     let prevX = 0;
     let prevProgress = 0;
     // Avoid re-flashing the same marker multiple times within one sweep pass
@@ -657,9 +673,11 @@ function ScanSweep({
     let lastSizeY: number | null = null;
 
     const step = (t: number) => {
-      if (start === null) start = t;
-      const elapsed = (t - start) % durationMs;
-      const progress = elapsed / durationMs;
+      if (lastFrameT === null) lastFrameT = t;
+      const dt = Math.min(t - lastFrameT, MAX_FRAME_MS);
+      lastFrameT = t;
+      progress += dt / durationMs;
+      if (progress >= 1) progress -= Math.floor(progress);
       const size = map.getSize();
       const width = size.x || 1;
       const currX = progress * width;

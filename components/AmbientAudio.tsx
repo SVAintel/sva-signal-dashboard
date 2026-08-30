@@ -67,7 +67,7 @@ export default function AmbientAudio({ playing, onTogglePlaying, volume, onVolum
       </button>
 
       {volumeOpen && (
-        <div className="absolute right-0 top-full z-[999] pt-1">
+        <div className="absolute right-0 top-full z-[1100] pt-1">
           <div className="rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-3 py-2 backdrop-blur">
             <input
               type="range"

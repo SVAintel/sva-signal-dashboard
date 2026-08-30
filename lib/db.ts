@@ -131,6 +131,41 @@ function ensureSchema(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
       `);
+
+      // Needed for gen_random_uuid() below. Neon/Vercel Postgres roles are
+      // allowed to create this extension; wrapped in its own try/catch since
+      // some Postgres hosts restrict extension creation to superusers and we
+      // don't want that alone to break the rest of schema setup.
+      try {
+        await db.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto;`);
+      } catch (err) {
+        console.error("CREATE EXTENSION pgcrypto failed (continuing):", err);
+      }
+
+      // User accounts (email/password auth via NextAuth Credentials
+      // provider — see lib/auth.ts). Passwords are bcrypt hashes, never
+      // plaintext. Email is the natural unique key/login identifier.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `);
+
+      // One row per user, storing their saved dashboard preferences as a
+      // single JSON blob (category filters, time range, sidebar width,
+      // ambient volume, etc.) rather than a bespoke column per preference —
+      // this list is expected to keep growing and none of it needs to be
+      // queried/filtered on individually.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS user_prefs (
+          user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `);
     })();
   }
   return schemaReady;
@@ -468,3 +503,67 @@ export async function pruneOldCountryStalenessFlags(days: number): Promise<void>
     console.error("pruneOldCountryStalenessFlags failed:", err);
   }
 }
+
+// --- User accounts + preferences ---------------------------------------
+// Unlike the best-effort caches above, these deliberately let errors
+// propagate to the caller (API routes) instead of swallowing them: a failed
+// signup or prefs save needs to be reported to the user, not silently
+// treated as success.
+
+export interface UserRecord {
+  id: string;
+  email: string;
+  passwordHash: string;
+  createdAt: string;
+}
+
+// Throws (unique violation, code 23505) if the email is already registered —
+// the signup route maps that into a friendly "already registered" message.
+export async function createUser(email: string, passwordHash: string): Promise<UserRecord> {
+  await ensureSchema();
+  const db = getPool();
+  const { rows } = await db.query(
+    `INSERT INTO users (email, password_hash) VALUES ($1, $2)
+     RETURNING id, email, password_hash, created_at;`,
+    [email.toLowerCase().trim(), passwordHash]
+  );
+  const row = rows[0];
+  return { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: row.created_at };
+}
+
+export async function getUserByEmail(email: string): Promise<UserRecord | null> {
+  await ensureSchema();
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT id, email, password_hash, created_at FROM users WHERE email = $1;`,
+    [email.toLowerCase().trim()]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return { id: row.id, email: row.email, passwordHash: row.password_hash, createdAt: row.created_at };
+}
+
+// Saved dashboard preferences are a free-form JSON blob — see components
+// that read/write this (Dashboard.tsx) for the actual shape (category
+// filters, time range, sidebar width, ambient volume, etc.). Kept untyped
+// here deliberately so adding a new persisted preference never requires a
+// migration.
+export async function getUserPrefs(userId: string): Promise<Record<string, unknown> | null> {
+  await ensureSchema();
+  const db = getPool();
+  const { rows } = await db.query(`SELECT prefs FROM user_prefs WHERE user_id = $1;`, [userId]);
+  const row = rows[0];
+  if (!row) return null;
+  return row.prefs as Record<string, unknown>;
+}
+
+export async function setUserPrefs(userId: string, prefs: Record<string, unknown>): Promise<void> {
+  await ensureSchema();
+  const db = getPool();
+  await db.query(
+    `INSERT INTO user_prefs (user_id, prefs, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (user_id) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = now();`,
+    [userId, JSON.stringify(prefs)]
+  );
+}
+
