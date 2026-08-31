@@ -252,8 +252,9 @@ export async function GET(req: Request) {
     url.searchParams.get("refresh") === "1" &&
     !!process.env.CRON_SECRET &&
     req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  let debug: Awaited<ReturnType<typeof runRefresh>> | undefined;
   if (isCronRefresh) {
-    await runRefresh();
+    debug = await runRefresh();
   } else {
     await ensureRefreshLoopStarted();
   }
@@ -266,11 +267,12 @@ export async function GET(req: Request) {
     stale: ageMs !== null && ageMs > CACHE_MS,
     refreshing: !!g.__navalRefreshing,
     outage: !!cache?.outage,
+    ...(debug ? { debug } : {}),
   });
 }
 
-async function runRefresh() {
-  if (g.__navalRefreshing) return;
+async function runRefresh(): Promise<{ aisCount: number; sanctionedCount: number; aisOutage: boolean; error?: string }> {
+  if (g.__navalRefreshing) return { aisCount: 0, sanctionedCount: 0, aisOutage: false, error: "already refreshing" };
   g.__navalRefreshing = true;
   try {
     const [{ vessels, outage }, sanctionedVessels] = await Promise.all([
@@ -280,8 +282,10 @@ async function runRefresh() {
     const cache: NavalCache = { data: [...vessels, ...sanctionedVessels], ts: Date.now(), outage };
     g.__navalCache = cache;
     await writeCacheToDb(cache);
+    return { aisCount: vessels.length, sanctionedCount: sanctionedVessels.length, aisOutage: outage };
   } catch (error) {
     console.error("[naval] background refresh error:", error);
+    return { aisCount: 0, sanctionedCount: 0, aisOutage: false, error: String(error) };
   } finally {
     g.__navalRefreshing = false;
   }
