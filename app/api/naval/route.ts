@@ -194,7 +194,13 @@ interface FleetLeaksVessel {
 async function fetchSanctionedRussianVessels(): Promise<NavalVessel[]> {
   try {
     const res = await fetch(FLEETLEAKS_URL, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; SVASignalDashboard/1.0)" },
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: "https://fleetleaks.com/map/",
+      },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
