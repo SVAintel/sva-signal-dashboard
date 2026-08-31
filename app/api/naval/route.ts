@@ -261,12 +261,15 @@ export async function GET(req: Request) {
         authProvidedLen?: number;
         authExpectedLen?: number;
         authMatches?: boolean;
+        runtimeSecretHash?: string;
+        providedAuthHash?: string;
       })
     | undefined;
   if (isCronRefresh) {
     debug = await runRefresh();
   } else if (refreshParamOk) {
     // auth failed on a forced-refresh attempt — report why without leaking the secret
+    const crypto = await import("crypto");
     debug = {
       aisCount: 0,
       sanctionedCount: 0,
@@ -277,6 +280,9 @@ export async function GET(req: Request) {
       authProvidedLen: providedAuth?.length ?? 0,
       authExpectedLen: expectedAuth.length,
       authMatches,
+      // safe fingerprints (not reversible) to compare secret values without exposing them
+      runtimeSecretHash: crypto.createHash("sha256").update(process.env.CRON_SECRET || "").digest("hex").slice(0, 12),
+      providedAuthHash: crypto.createHash("sha256").update(providedAuth || "").digest("hex").slice(0, 12),
     };
     await ensureRefreshLoopStarted();
   } else {
