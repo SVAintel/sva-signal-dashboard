@@ -248,13 +248,37 @@ export async function GET(req: Request) {
   // AIS window + FleetLeaks fetch). Regular user page loads never hit this
   // branch, so they always get an instant cache read.
   const url = new URL(req.url);
-  const isCronRefresh =
-    url.searchParams.get("refresh") === "1" &&
-    !!process.env.CRON_SECRET &&
-    req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
-  let debug: Awaited<ReturnType<typeof runRefresh>> | undefined;
+  const refreshParamOk = url.searchParams.get("refresh") === "1";
+  const secretConfigured = !!process.env.CRON_SECRET;
+  const providedAuth = req.headers.get("authorization");
+  const expectedAuth = `Bearer ${process.env.CRON_SECRET}`;
+  const authMatches = providedAuth === expectedAuth;
+  const isCronRefresh = refreshParamOk && secretConfigured && authMatches;
+  let debug:
+    | (Awaited<ReturnType<typeof runRefresh>> & {
+        refreshParamOk?: boolean;
+        secretConfigured?: boolean;
+        authProvidedLen?: number;
+        authExpectedLen?: number;
+        authMatches?: boolean;
+      })
+    | undefined;
   if (isCronRefresh) {
     debug = await runRefresh();
+  } else if (refreshParamOk) {
+    // auth failed on a forced-refresh attempt — report why without leaking the secret
+    debug = {
+      aisCount: 0,
+      sanctionedCount: 0,
+      aisOutage: false,
+      error: "auth check failed",
+      refreshParamOk,
+      secretConfigured,
+      authProvidedLen: providedAuth?.length ?? 0,
+      authExpectedLen: expectedAuth.length,
+      authMatches,
+    };
+    await ensureRefreshLoopStarted();
   } else {
     await ensureRefreshLoopStarted();
   }
