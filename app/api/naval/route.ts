@@ -194,13 +194,7 @@ interface FleetLeaksVessel {
 async function fetchSanctionedRussianVessels(): Promise<NavalVessel[]> {
   try {
     const res = await fetch(FLEETLEAKS_URL, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://fleetleaks.com/map/",
-      },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SVASignalDashboard/1.0)" },
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -254,43 +248,13 @@ export async function GET(req: Request) {
   // AIS window + FleetLeaks fetch). Regular user page loads never hit this
   // branch, so they always get an instant cache read.
   const url = new URL(req.url);
-  const refreshParamOk = url.searchParams.get("refresh") === "1";
-  const secretConfigured = !!process.env.CRON_SECRET;
-  const providedAuth = req.headers.get("authorization");
-  const expectedAuth = `Bearer ${process.env.CRON_SECRET}`;
-  const authMatches = providedAuth === expectedAuth;
-  const isCronRefresh = refreshParamOk && secretConfigured && authMatches;
-  let debug:
-    | (Awaited<ReturnType<typeof runRefresh>> & {
-        refreshParamOk?: boolean;
-        secretConfigured?: boolean;
-        authProvidedLen?: number;
-        authExpectedLen?: number;
-        authMatches?: boolean;
-        runtimeSecretHash?: string;
-        providedAuthHash?: string;
-      })
-    | undefined;
+  const isCronRefresh =
+    url.searchParams.get("refresh") === "1" &&
+    !!process.env.CRON_SECRET &&
+    req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  let debug: Awaited<ReturnType<typeof runRefresh>> | undefined;
   if (isCronRefresh) {
     debug = await runRefresh();
-  } else if (refreshParamOk) {
-    // auth failed on a forced-refresh attempt — report why without leaking the secret
-    const crypto = await import("crypto");
-    debug = {
-      aisCount: 0,
-      sanctionedCount: 0,
-      aisOutage: false,
-      error: "auth check failed",
-      refreshParamOk,
-      secretConfigured,
-      authProvidedLen: providedAuth?.length ?? 0,
-      authExpectedLen: expectedAuth.length,
-      authMatches,
-      // safe fingerprints (not reversible) to compare secret values without exposing them
-      runtimeSecretHash: crypto.createHash("sha256").update(process.env.CRON_SECRET || "").digest("hex").slice(0, 12),
-      providedAuthHash: crypto.createHash("sha256").update(providedAuth || "").digest("hex").slice(0, 12),
-    };
-    await ensureRefreshLoopStarted();
   } else {
     await ensureRefreshLoopStarted();
   }
