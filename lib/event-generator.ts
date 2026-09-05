@@ -1,6 +1,7 @@
 import { Event } from "@/lib/types";
 import Parser from "rss-parser";
 import { getAppCache, setAppCache } from "@/lib/db";
+import { haversineDistanceKm } from "@/lib/geo";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
@@ -306,6 +307,29 @@ function geolocateFromText(text: string): { lat: number; lng: number } {
   // No match — pick a random land fallback instead of open ocean
   const fb = LAND_FALLBACKS[Math.floor(Math.random() * LAND_FALLBACKS.length)];
   return { lat: fb.lat + (Math.random() - 0.5) * 4, lng: fb.lng + (Math.random() - 0.5) * 4 };
+}
+
+// Reverse-lookup a human-readable place name for an arbitrary lat/lng by
+// finding the nearest entry in the same curated city/country list used for
+// forward geocoding above. Used by the correlation-clustering feature to
+// label a cluster's centroid with a real place name instead of raw
+// coordinates. Deliberately reuses COMBINED_GEO_LOOKUP rather than a
+// separate reverse-geocoding API/dataset — good enough for a label, and
+// keeps this zero-dependency/zero-quota.
+export function nearestPlaceName(lat: number, lng: number): string {
+  let best: GeoEntry | null = null;
+  let bestDistanceKm = Infinity;
+  for (const entry of COMBINED_GEO_LOOKUP) {
+    const d = haversineDistanceKm({ lat, lng }, { lat: entry.lat, lng: entry.lng });
+    if (d < bestDistanceKm) {
+      bestDistanceKm = d;
+      best = entry;
+    }
+  }
+  if (!best) return "Unknown location";
+  // names[0] is the canonical/most-recognizable name for the entry.
+  const name = best.names[0];
+  return name.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // Fetch events from all real APIs with timeout

@@ -1065,6 +1065,30 @@ function MapConflictZoneFocuser({ zone }: { zone: ConflictZoneOutput | null }) {
   return null;
 }
 
+// Flies the map to a selected Pattern Alert cluster's centroid, mirroring
+// MapEventFocuser. Takes a plain lat/lng + id rather than a full Event since
+// clusters are a synthesized aggregate (not a single Event record).
+function MapClusterFocuser({ cluster }: { cluster: { id: string; lat: number; lng: number } | null }) {
+  const map = useMap();
+  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+
+  useEffect(() => {
+    if (cluster) {
+      if (!priorViewRef.current) {
+        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      }
+      const targetZoom = Math.max(map.getZoom(), 5);
+      map.flyTo([cluster.lat, cluster.lng], targetZoom, { duration: 0.9 });
+    } else if (priorViewRef.current) {
+      const { center, zoom } = priorViewRef.current;
+      map.flyTo(center, zoom, { duration: 0.9 });
+      priorViewRef.current = null;
+    }
+  }, [cluster?.id, map]);
+
+  return null;
+}
+
 export default function WorldMap({
   events,
   selectedEvent,
@@ -1087,6 +1111,7 @@ export default function WorldMap({
   mobileVisible = true,
   selectedPort = null,
   onSelectPort,
+  selectedCluster = null,
 }: {
   events: Event[];
   selectedEvent: Event | null;
@@ -1109,6 +1134,7 @@ export default function WorldMap({
   mobileVisible?: boolean;
   selectedPort?: PortFeature | null;
   onSelectPort?: (port: PortFeature) => void;
+  selectedCluster?: { id: string; lat: number; lng: number } | null;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
@@ -1178,6 +1204,14 @@ export default function WorldMap({
       <MapPortFocuser port={selectedPort} />
       <MapCountryFocuser feature={selectedCountryFeature} />
       <MapConflictZoneFocuser zone={selectedConflictZone} />
+      <MapClusterFocuser cluster={selectedCluster} />
+      {selectedCluster && (
+        <Circle
+          center={[selectedCluster.lat, selectedCluster.lng]}
+          radius={300000}
+          pathOptions={{ color: "#d4b36a", weight: 2, fillColor: "#d4b36a", fillOpacity: 0.08, dashArray: "6 6" }}
+        />
+      )}
       <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
       <TileLayer
         url={`https://basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}${

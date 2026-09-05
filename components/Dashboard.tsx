@@ -13,6 +13,7 @@ import MilitaryBaseDetailPanel, { MilitaryBaseData } from "./MilitaryBaseDetailP
 import FleetTrackerDetailPanel, { FleetGroup } from "./FleetTrackerDetailPanel";
 import CountryDetailPanel, { CountryData } from "./CountryDetailPanel";
 import PortDetailPanel, { PortData } from "./PortDetailPanel";
+import PatternAlertsPanel, { CorrelationCluster } from "./PatternAlertsPanel";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
 import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
@@ -37,7 +38,7 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
   humanitarian: { label: "HUM", color: "#f43f5e", tooltip: "HUM — Humanitarian Crises & Displacement" },
 };
 
-type SidebarTab = "events" | "news" | "stocks" | "analyst";
+type SidebarTab = "events" | "news" | "stocks" | "analyst" | "patterns";
 
 // Time-range filter options for the map's recency selector.
 const TIME_RANGES: { label: string; hours: number | null }[] = [
@@ -130,6 +131,7 @@ export default function Dashboard() {
   const [selectedFleetGroup, setSelectedFleetGroup] = useState<FleetGroup | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<CountryData | null>(null);
   const [selectedPort, setSelectedPort] = useState<PortData | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<CorrelationCluster | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
   const [portFilter, setPortFilter] = useState<"all" | "major" | "minor">("major");
@@ -572,6 +574,17 @@ export default function Dashboard() {
     setSelectedPort(null);
   };
 
+  const handleClusterSelect = (cluster: CorrelationCluster | null) => {
+    setSelectedCluster(cluster);
+    if (cluster) {
+      setSelectedEvent(null);
+      setDetailPanelOpen(false);
+      setSelectedMilitaryBase(null);
+      setSelectedFleetGroup(null);
+      setSelectedPort(null);
+    }
+  };
+
   const toggleLayer = (layer: MapLayerKey) => {
     setActiveLayers((prev) => {
       const next = !prev[layer];
@@ -633,6 +646,7 @@ export default function Dashboard() {
     mobileVisible: mobileView === "map",
     selectedPort,
     onSelectPort: handlePortSelect,
+    selectedCluster: selectedCluster ? { id: selectedCluster.id, lat: selectedCluster.centroid.lat, lng: selectedCluster.centroid.lng } : null,
   };
 
   // Shared layer-toggle definitions used by both the desktop dropdown and the
@@ -801,7 +815,7 @@ export default function Dashboard() {
               block always render together via md:flex. */}
           <div className={`min-h-0 flex-col md:flex md:flex-1 ${mobileView === "live" ? "hidden" : "flex flex-1"}`}>
             <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e]">
-              {(["events", "news", "stocks", "analyst"] as SidebarTab[]).map((tab) => (
+              {(["events", "news", "stocks", "analyst", "patterns"] as SidebarTab[]).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -815,6 +829,7 @@ export default function Dashboard() {
                   {tab === "news" && "INSIGHTS"}
                   {tab === "stocks" && "MARKETS"}
                   {tab === "analyst" && "SVA ANALYST"}
+                  {tab === "patterns" && "PATTERNS"}
                 </button>
               ))}
             </div>
@@ -836,6 +851,12 @@ export default function Dashboard() {
               {activeTab === "news" && <NewsPanel />}
               {activeTab === "stocks" && <StockMarketPanel />}
               {activeTab === "analyst" && <AIAnalystPanel events={events} />}
+              {activeTab === "patterns" && (
+                <PatternAlertsPanel
+                  onSelectCluster={handleClusterSelect}
+                  selectedClusterId={selectedCluster?.id ?? null}
+                />
+              )}
             </div>
           </div>
 
