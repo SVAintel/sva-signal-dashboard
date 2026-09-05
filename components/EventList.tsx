@@ -14,6 +14,7 @@ const categoryMeta: Record<string, { label: string; color: string; bg: string }>
   nuclear:           { label: "NUC",     color: "#84cc16", bg: "#111a0a" },
   energy:            { label: "NRG",     color: "#d97706", bg: "#1a1200" },
   humanitarian:      { label: "HUM",     color: "#f43f5e", bg: "#1a0a0e" },
+  general:           { label: "GEN",     color: "#94a3b8", bg: "#12151a" },
 };
 
 const confidenceDot: Record<string, string> = {
@@ -90,7 +91,7 @@ export default function EventList({
           </div>
         )}
         {filteredEvents.map((event) => {
-          const meta = categoryMeta[event.category] || categoryMeta.war;
+          const meta = categoryMeta[event.category] || categoryMeta.general;
           const isSelected = selectedEvent?.id === event.id;
           return (
             <button

@@ -20,6 +20,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   nuclear: "#84cc16",
   energy: "#d97706",
   humanitarian: "#f43f5e",
+  general: "#94a3b8",
 };
 
 const EARTH_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg";
@@ -980,7 +981,7 @@ export default function GlobeMap({
       lat: event.location.lat,
       lng: event.location.lng,
       altitude: FLAT_ALTITUDE,
-      color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.war,
+      color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.general,
       size: 14,
       label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
       kind: "event",
@@ -1264,7 +1265,7 @@ export default function GlobeMap({
   // the 2D map's bigger EventPingRings focus effect).
   const ringData = useMemo<RingDatum[]>(() => {
     if (!selectedEvent) return [];
-    const color = CATEGORY_COLORS[selectedEvent.category] || CATEGORY_COLORS.war;
+    const color = CATEGORY_COLORS[selectedEvent.category] || CATEGORY_COLORS.general;
     return [
       {
         id: `focus-${selectedEvent.id}`,
