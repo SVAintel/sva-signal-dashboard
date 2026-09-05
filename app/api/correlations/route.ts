@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRecentEvents } from "@/lib/db";
 import { buildCorrelationClusters } from "@/lib/correlation";
+import { attachClusterSummaries } from "@/lib/correlation-ai";
 
 // "Pattern Alerts" — surfaces geographic+temporal clusters of signals that
 // span multiple categories (e.g. a WAR story and a MARKET signal both near
@@ -17,7 +18,8 @@ export async function GET() {
   try {
     const rows = await getRecentEvents(WINDOW_DAYS);
     const clusters = buildCorrelationClusters(rows);
-    return NextResponse.json({ clusters });
+    const withSummaries = await attachClusterSummaries(clusters);
+    return NextResponse.json({ clusters: withSummaries });
   } catch (error) {
     console.error("[correlations] failed:", error);
     return NextResponse.json({ clusters: [], error: "Failed to compute correlations" }, { status: 500 });

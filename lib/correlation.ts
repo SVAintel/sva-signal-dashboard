@@ -23,6 +23,28 @@ import { nearestPlaceName } from "@/lib/event-generator";
 const CLUSTER_DISTANCE_KM = 300;
 const CLUSTER_WINDOW_HOURS = 24;
 
+// Per-category weight for severity scoring — reflects how "alarming" a
+// category is on its own, not how often it appears in the feed. Categories
+// tied to mass-casualty/strategic risk (nuclear, biological) score highest;
+// routine market/humanitarian coverage scores lowest. Tune freely — this is
+// a simple weighted heuristic, not a calibrated model.
+const CATEGORY_SEVERITY_WEIGHT: Record<string, number> = {
+  nuclear: 5,
+  biological: 5,
+  counter_terrorism: 4,
+  war: 3,
+  cyber: 3,
+  energy: 2,
+  political_unrest: 2,
+  natural_disaster: 2,
+  humanitarian: 1,
+  market: 1,
+};
+
+function categorySeverityWeight(category: string): number {
+  return CATEGORY_SEVERITY_WEIGHT[category] ?? 1;
+}
+
 export interface CorrelationClusterMember {
   title: string;
   category: string;
@@ -42,6 +64,8 @@ export interface CorrelationCluster {
   earliestAt: string;
   latestAt: string;
   members: CorrelationClusterMember[];
+  severity: number; // 0-10ish composite score, higher = more urgent/notable
+  summary?: string; // optional AI-generated one-line "why this matters", filled in by lib/correlation-ai.ts
 }
 
 function toTimestamp(row: EventHistoryRow): string {
@@ -112,6 +136,21 @@ export function buildCorrelationClusters(rows: EventHistoryRow[]): CorrelationCl
     const centroidLat = members.reduce((sum, m) => sum + m.lat, 0) / members.length;
     const centroidLng = members.reduce((sum, m) => sum + m.lng, 0) / members.length;
     const timestamps = members.map((m) => new Date(toTimestamp(m)).getTime());
+    const latestAtMs = Math.max(...timestamps);
+
+    // Severity blends three signals:
+    //  1. Category weight — sum of *distinct* categories' individual weights,
+    //     so a war+nuclear cluster outranks a market+humanitarian one.
+    //  2. Recency — a cluster whose most recent signal just landed is more
+    //     actionable than one whose last signal was 20+ hours ago (even if
+    //     both are still inside the 24h clustering window).
+    //  3. Density (diminishing returns) — more corroborating signals is a
+    //     mild boost, via log so 20 members doesn't dwarf category/recency.
+    const categoryScore = Array.from(categories).reduce((sum, c) => sum + categorySeverityWeight(c), 0);
+    const hoursSinceLatest = (Date.now() - latestAtMs) / 3_600_000;
+    const recencyScore = Math.max(0, 1 - hoursSinceLatest / CLUSTER_WINDOW_HOURS) * 3;
+    const densityScore = Math.log2(members.length + 1);
+    const severity = Math.round((categoryScore + recencyScore + densityScore) * 10) / 10;
 
     clusters.push({
       id: `${Math.round(centroidLat * 100)}-${Math.round(centroidLng * 100)}-${Math.min(...timestamps)}`,
@@ -120,7 +159,8 @@ export function buildCorrelationClusters(rows: EventHistoryRow[]): CorrelationCl
       categories: Array.from(categories).sort(),
       memberCount: members.length,
       earliestAt: new Date(Math.min(...timestamps)).toISOString(),
-      latestAt: new Date(Math.max(...timestamps)).toISOString(),
+      latestAt: new Date(latestAtMs).toISOString(),
+      severity,
       members: members.map((m) => ({
         title: m.title,
         category: m.category,
@@ -133,13 +173,9 @@ export function buildCorrelationClusters(rows: EventHistoryRow[]): CorrelationCl
     });
   }
 
-  // Most significant first: more categories involved, then more members,
-  // then most recent.
-  clusters.sort((a, b) => {
-    if (b.categories.length !== a.categories.length) return b.categories.length - a.categories.length;
-    if (b.memberCount !== a.memberCount) return b.memberCount - a.memberCount;
-    return new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime();
-  });
+  // Most severe first — severity already blends category weight, recency,
+  // and member density, so this replaces the old three-key manual sort.
+  clusters.sort((a, b) => b.severity - a.severity);
 
   return clusters;
 }

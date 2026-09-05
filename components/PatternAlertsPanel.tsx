@@ -22,6 +22,8 @@ export interface CorrelationCluster {
   earliestAt: string;
   latestAt: string;
   members: CorrelationClusterMember[];
+  severity: number;
+  summary?: string;
 }
 
 // Category -> display label/color, reusing the same short tags used
@@ -42,6 +44,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] || category.toUpperCase();
+}
+
+// Severity is an open-ended composite score (category weight + recency +
+// density — see lib/correlation.ts) rather than a fixed 0-10 scale, so
+// thresholds here are just practical cut points observed from real output,
+// not a calibrated scale.
+function severityStyle(severity: number): { label: string; className: string } {
+  if (severity >= 9) return { label: "HIGH", className: "bg-red-950 text-red-400 border-red-800" };
+  if (severity >= 6) return { label: "MED", className: "bg-amber-950 text-amber-400 border-amber-800" };
+  return { label: "LOW", className: "bg-slate-800 text-slate-400 border-slate-700" };
 }
 
 interface PatternAlertsPanelProps {
@@ -116,7 +128,13 @@ export default function PatternAlertsPanel({ onSelectCluster, selectedClusterId 
             >
               <div className="flex items-center gap-1.5">
                 <MapPin size={11} className="text-[#d4b36a] shrink-0" />
-                <h3 className="text-xs font-semibold text-slate-200">{cluster.place}</h3>
+                <h3 className="text-xs font-semibold text-slate-200 flex-1">{cluster.place}</h3>
+                <span
+                  className={`text-[9px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${severityStyle(cluster.severity).className}`}
+                  title={`Severity score: ${cluster.severity}`}
+                >
+                  {severityStyle(cluster.severity).label}
+                </span>
               </div>
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {cluster.categories.map((c) => (
@@ -128,6 +146,9 @@ export default function PatternAlertsPanel({ onSelectCluster, selectedClusterId 
                   </span>
                 ))}
               </div>
+              {cluster.summary && (
+                <p className="text-[11px] text-slate-300 mt-1.5 leading-snug">{cluster.summary}</p>
+              )}
               <p className="text-[10px] text-slate-500 mt-1.5">
                 {cluster.memberCount} signals · {new Date(cluster.latestAt).toLocaleString()}
               </p>
