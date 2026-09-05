@@ -12,7 +12,7 @@ interface StoreState {
   setActiveTimeRangeHours: (hours: number | null) => void;
 }
 
-const ALL_CATEGORIES = ["war", "counter_terrorism", "natural_disaster", "market", "biological", "political_unrest", "cyber", "nuclear", "energy", "humanitarian"];
+const ALL_CATEGORIES = ["war", "counter_terrorism", "natural_disaster", "market", "biological", "political_unrest", "cyber", "nuclear", "energy", "humanitarian", "general"];
 
 export const useStore = create<StoreState>((set) => ({
   activeCategories: ALL_CATEGORIES, // all on by default

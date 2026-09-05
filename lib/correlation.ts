@@ -39,6 +39,7 @@ const CATEGORY_SEVERITY_WEIGHT: Record<string, number> = {
   natural_disaster: 2,
   humanitarian: 1,
   market: 1,
+  general: 1,
 };
 
 function categorySeverityWeight(category: string): number {
@@ -123,11 +124,23 @@ export function buildCorrelationClusters(rows: EventHistoryRow[]): CorrelationCl
 
   const clusters: CorrelationCluster[] = [];
   for (const indices of groups.values()) {
-    const categories = new Set(indices.map((i) => rows[i].category));
+    // Category diversity now also credits each event's secondary categories
+    // (e.g. a single "war" article that also scores on "cyber" keywords),
+    // not just its primary category — this lets two otherwise same-category
+    // articles that each brush against a second theme still register as a
+    // cross-category pattern. But a *single* multi-tagged article should
+    // never count as a "pattern" on its own — that's just one story, not
+    // independent signals converging — so this still requires 2+ distinct
+    // events in the group in addition to 2+ distinct categories.
+    const categories = new Set<string>();
+    for (const i of indices) {
+      categories.add(rows[i].category);
+      for (const sc of rows[i].secondaryCategories || []) categories.add(sc);
+    }
     // The whole point of "pattern alerts" is surfacing cross-category
     // convergence — a cluster of 10 stories all tagged "war" about the same
     // battle is just one story reported many times, not a pattern.
-    if (categories.size < 2) continue;
+    if (indices.length < 2 || categories.size < 2) continue;
 
     const members = indices
       .map((i) => rows[i])

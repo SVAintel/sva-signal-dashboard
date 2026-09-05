@@ -36,6 +36,7 @@ const categoryLabels: Record<string, { label: string; color: string; tooltip: st
   nuclear: { label: "NUC", color: "#84cc16", tooltip: "NUC — Nuclear & Radiological Activity" },
   energy: { label: "NRG", color: "#d97706", tooltip: "NRG — Energy Infrastructure & Supply" },
   humanitarian: { label: "HUM", color: "#f43f5e", tooltip: "HUM — Humanitarian Crises & Displacement" },
+  general: { label: "GEN", color: "#94a3b8", tooltip: "GEN — General / Uncategorized" },
 };
 
 type SidebarTab = "events" | "news" | "stocks" | "analyst" | "patterns";

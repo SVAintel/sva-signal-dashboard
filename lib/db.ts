@@ -62,6 +62,9 @@ function ensureSchema(): Promise<void> {
           last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
       `);
+      // Added after the table already existed in production — CREATE TABLE IF
+      // NOT EXISTS above won't retrofit new columns onto an existing table.
+      await db.query(`ALTER TABLE event_snapshots ADD COLUMN IF NOT EXISTS secondary_categories JSONB NOT NULL DEFAULT '[]'::jsonb;`);
       await db.query(`CREATE INDEX IF NOT EXISTS event_snapshots_first_seen_idx ON event_snapshots (first_seen_at);`);
       await db.query(`CREATE INDEX IF NOT EXISTS event_snapshots_category_idx ON event_snapshots (category);`);
 
@@ -188,8 +191,8 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
       await db.query(
         `INSERT INTO event_snapshots (
           dedup_key, title, category, lat, lng, source, url, description,
-          ai_notes, confidence, event_timestamp, first_seen_at, last_seen_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+          ai_notes, confidence, event_timestamp, secondary_categories, first_seen_at, last_seen_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
         ON CONFLICT (dedup_key) DO UPDATE SET last_seen_at = now();`,
         [
           key,
@@ -203,6 +206,7 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
           evt.aiNotes ?? null,
           evt.confidence ?? null,
           evt.timestamp,
+          JSON.stringify(evt.secondaryCategories ?? []),
         ]
       );
     }
@@ -217,6 +221,7 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
 export interface EventHistoryRow {
   title: string;
   category: string;
+  secondaryCategories: string[];
   lat: number;
   lng: number;
   source: string;
@@ -231,7 +236,7 @@ export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> 
     await ensureSchema();
     const db = getPool();
     const { rows } = await db.query(
-      `SELECT title, category, lat, lng, source, url, description, event_timestamp, first_seen_at
+      `SELECT title, category, lat, lng, source, url, description, event_timestamp, first_seen_at, secondary_categories
        FROM event_snapshots
        WHERE first_seen_at > now() - ($1::text || ' days')::interval
        ORDER BY first_seen_at DESC
@@ -241,6 +246,7 @@ export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> 
     return rows.map((r) => ({
       title: r.title,
       category: r.category,
+      secondaryCategories: Array.isArray(r.secondary_categories) ? r.secondary_categories : [],
       lat: Number(r.lat),
       lng: Number(r.lng),
       source: r.source,

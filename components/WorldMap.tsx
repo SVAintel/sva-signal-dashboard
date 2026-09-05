@@ -35,6 +35,7 @@ const icons: Record<string, L.DivIcon> = {
   nuclear: makeIcon("#84cc16"),
   energy: makeIcon("#d97706"),
   humanitarian: makeIcon("#f43f5e"),
+  general: makeIcon("#94a3b8"),
 };
 
 // Naval vessel marker: a small square/diamond in slate-blue to visually
@@ -1596,7 +1597,7 @@ export default function WorldMap({
         <Marker
           key={event.id}
           position={[event.location.lat, event.location.lng]}
-          icon={icons[event.category] || icons.war}
+          icon={icons[event.category] || icons.general}
           ref={(m) => {
             if (m) markerRefs.current.set(event.id, m);
             else markerRefs.current.delete(event.id);

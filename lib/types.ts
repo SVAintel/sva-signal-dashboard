@@ -2,6 +2,12 @@ export interface Event {
   id: string;
   title: string;
   category: string;
+  // Additional categories this event also plausibly belongs to (e.g. a
+  // cyberattack that knocked out a power grid during a war would be
+  // category: "war", secondaryCategories: ["cyber", "energy"]). Optional —
+  // most events only score meaningfully in one category. Populated by
+  // categorizeNewsText() in lib/event-generator.ts.
+  secondaryCategories?: string[];
   location: { lat: number; lng: number };
   source: string;
   url?: string;

@@ -362,6 +362,7 @@ export async function generateMockEvents(): Promise<Event[]> {
         title: rawEvent.title,
         description: rawEvent.description,
         category: rawEvent.category,
+        secondaryCategories: rawEvent.secondaryCategories || undefined,
         location: rawEvent.location,
         source: rawEvent.source,
         url: rawEvent.url,
@@ -439,48 +440,108 @@ function isBreakingNews(title: string, desc: string) {
   return NEWS_BREAKING_SIGNALS.some(kw => hasKeyword(text, kw));
 }
 
-function categorizeNewsText(title: string, description: string): string {
-  const text = (title + " " + description).toLowerCase();
-  if (["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "epidemic", "plague", "infection", "contamination"].some(kw => hasKeyword(text, kw)))
-    return "biological";
-  // Natural disasters — checked early since these are unambiguous and
-  // otherwise fall through to the generic "war" default (e.g. an
-  // earthquake headline mentioning "seized" or "strike" for something
-  // unrelated would still get miscategorized without this check).
-  if ([
+// Category classification is score-based (count keyword occurrences per
+// category, highest score wins) rather than the old fixed-order "first
+// matching category wins" chain. That old approach meant a story mentioning
+// both "protest" and "airstrike" always got categorized as political_unrest
+// simply because that check happened to run before the war check,
+// regardless of which term was actually more prominent in the text —
+// mirrors the same score-based fix already applied to geolocateFromText()
+// above for the identical reason.
+const CATEGORY_RULES: Record<string, string[]> = {
+  biological: ["outbreak", "pandemic", "disease", "virus", "pathogen", "bioterror", "epidemic", "plague", "infection", "contamination"],
+  natural_disaster: [
     "earthquake", "quake", "tsunami", "wildfire", "hurricane", "typhoon",
     "flood", "landslide", "mudslide", "volcano", "eruption", "tornado",
     "cyclone", "drought", "avalanche", "aftershock", "seismic",
-  ].some(kw => hasKeyword(text, kw)))
-    return "natural_disaster";
-  // Terror/insurgent-group activity — check before the generic "war" bucket
-  // so militant/terror-group violence isn't mislabeled as conventional war.
-  if ([
+  ],
+  counter_terrorism: [
     "terror", "isis", "isis-k", "al-qaeda", "al-shabaab", "boko haram",
     "bombing", "suicide bomb", "car bomb", "ied", "jihad", "jihadist",
     "extremist", "radicalization", "militant", "insurgent", "insurgency",
     "hostage", "hijack",
-  ].some(kw => hasKeyword(text, kw)))
-    return "counter_terrorism";
-  // Civil/political instability — protests, coups, election crises, regime
-  // change — distinct from armed conflict between states/organized forces.
-  if ([
+  ],
+  political_unrest: [
     "protest", "coup", "uprising", "riot", "civil unrest", "unrest",
     "election fraud", "demonstration", "political crisis", "impeach",
     "overthrow", "junta", "martial law", "no-confidence vote", "resigns amid",
     "opposition crackdown", "regime", "ballot", "disputed election",
     "government collapse", "parliament dissolved", "mass resignation",
-  ].some(kw => hasKeyword(text, kw)))
-    return "political_unrest";
-  if (["cyberattack", "ransomware", "hacking", "data breach", "malware", "phishing", "cyber", "infrastructure attack"].some(kw => hasKeyword(text, kw)))
-    return "cyber";
-  if (["nuclear", "radiation", "iaea", "proliferation", "uranium", "warhead", "reactor accident", "dirty bomb"].some(kw => hasKeyword(text, kw)))
-    return "nuclear";
-  if (["energy crisis", "pipeline", "oil sanction", "gas supply", "energy security", "blackout", "power grid"].some(kw => hasKeyword(text, kw)))
-    return "energy";
-  if (["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"].some(kw => hasKeyword(text, kw)))
-    return "humanitarian";
-  return "war";
+  ],
+  cyber: ["cyberattack", "ransomware", "hacking", "data breach", "malware", "phishing", "cyber", "infrastructure attack"],
+  nuclear: ["nuclear", "radiation", "iaea", "proliferation", "uranium", "warhead", "reactor accident", "dirty bomb"],
+  energy: ["energy crisis", "pipeline", "oil sanction", "gas supply", "energy security", "blackout", "power grid"],
+  humanitarian: ["refugee", "famine", "humanitarian", "displaced", "aid worker", "starvation", "food crisis", "human rights"],
+  // War previously had no keyword list at all — it was just the fallback
+  // when nothing else matched, which is exactly the bug that made "war" a
+  // catch-all for unrelated news. It now has to earn its score like every
+  // other category. Kept deliberately specific to armed-conflict language
+  // (not bare "attack"/"strike", which are too generic and shared with
+  // counter_terrorism/political_unrest) to avoid swinging too far the other
+  // way and starving the war category of real matches.
+  // Broadened after live testing showed the initial narrow list (only
+  // set-piece phrases like "front line"/"combat operation") missed a large
+  // share of ordinary war-reporting vocabulary — drone/rocket attacks,
+  // rebel/militia clashes, military-post/barracks incidents, warplane and
+  // warship items — and those stories were falling through to "general"
+  // instead of "war". Generic words that overlap with other buckets
+  // ("attack", "strike", "killed") are still deliberately left out so a
+  // random crime/accident story doesn't get pulled into "war".
+  war: [
+    "invasion", "airstrike", "air strike", "missile strike", "rocket attack",
+    "drone attack", "drone strike", "shelling", "artillery strike",
+    "front line", "frontline", "offensive", "battlefield", "combat operation",
+    "troops advance", "military operation", "warzone", "artillery",
+    "ceasefire", "battalion", "occupied territory", "armed forces",
+    "war crimes", "rebel attack", "rebels", "militia clash", "clashes",
+    "military barracks", "military post", "military base attack",
+    "warplane", "fighter jet", "warship", "gunship", "mortar attack",
+    "combatants", "war infographics", "wartranslated", "clash report",
+    "security forces raid", "insurgent attack", "ambush", "war",
+    "conflict", "brigade", "military aid", "arms sale", "weapons sale",
+    "retaliatory strike", "houthi", "centcom", "combat aircraft",
+    "military exercise", "shot down", "air defense system",
+  ],
+};
+
+// Word-boundary-aware occurrence COUNT (not just a boolean hasKeyword hit) —
+// a headline repeating "airstrike" three times should score higher than one
+// that mentions it once, so ties between categories favor whichever is
+// actually more central to the story.
+function countKeywordOccurrences(text: string, keyword: string): number {
+  const escaped = escapeRegExp(keyword);
+  const startsWord = /^\w/.test(keyword);
+  const endsWord = /\w$/.test(keyword);
+  const pattern = `${startsWord ? "\\b" : ""}${escaped}${endsWord ? "\\b" : ""}`;
+  const matches = text.match(new RegExp(pattern, "gi"));
+  return matches ? matches.length : 0;
+}
+
+function categorizeNewsText(title: string, description: string): { primary: string; secondary: string[] } {
+  const text = (title + " " + description).toLowerCase();
+
+  const scores = Object.entries(CATEGORY_RULES).map(([category, keywords]) => ({
+    category,
+    score: keywords.reduce((sum, kw) => sum + countKeywordOccurrences(text, kw), 0),
+  }));
+
+  const ranked = scores.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+
+  // Nothing matched any category's keywords — this used to silently fall
+  // back to "war", mislabeling unrelated stories (economic policy, generic
+  // politics, etc.) as armed conflict. "general" is an honest label for
+  // "didn't fit any specific bucket" instead.
+  if (ranked.length === 0) return { primary: "general", secondary: [] };
+
+  // Secondary categories: other categories that also scored, capped at 2 so
+  // an event doesn't get tagged with every category it loosely brushes
+  // against. Consumed by the Pattern Alerts correlation feature so a single
+  // article that already spans categories (e.g. a cyberattack on a power
+  // grid during a war) can register as cross-category on its own.
+  return {
+    primary: ranked[0].category,
+    secondary: ranked.slice(1, 3).map((s) => s.category),
+  };
 }
 
 // NewsAPI - breaking news for live geopolitical/threat events
@@ -521,7 +582,7 @@ async function fetchNewsAPIEvents() {
     return unique
       .filter((article: any) => isBreakingNews(article.title || "", article.description || ""))
       .reduce((acc: any[], article: any) => {
-        const category = categorizeNewsText(article.title, article.description || "");
+        const { primary: category, secondary: secondaryCategories } = categorizeNewsText(article.title, article.description || "");
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
         if (categoryCounts[category] > 5) return acc; // max 5 per category
         acc.push({
@@ -531,6 +592,7 @@ async function fetchNewsAPIEvents() {
           source: `NewsAPI / ${article.source?.name || "Unknown"}`,
           url: article.url,
           category,
+          secondaryCategories,
           timestamp: new Date(article.publishedAt).toISOString(),
         });
         return acc;
@@ -626,7 +688,7 @@ async function fetchRSSEvents() {
 
       if (!isBreakingNews(title, description)) continue;
 
-      const category = categorizeNewsText(title, description);
+      const { primary: category, secondary: secondaryCategories } = categorizeNewsText(title, description);
       categoryCounts[category] = (categoryCounts[category] || 0) + 1;
       if (categoryCounts[category] > 8) continue; // cap per category across all RSS feeds combined
 
@@ -638,6 +700,7 @@ async function fetchRSSEvents() {
         source: `RSS / ${feed.name}`,
         url: item.link || feed.url,
         category,
+        secondaryCategories,
         timestamp: item.isoDate ? new Date(item.isoDate).toISOString() : new Date().toISOString(),
       });
     }
@@ -986,13 +1049,15 @@ async function fetchTelegramChannel(channel: { name: string; handle: string }) {
 
     return capped.map((m, i) => {
       const text = translated[i];
+      const { primary: category, secondary: secondaryCategories } = categorizeNewsText(text, "");
       return {
         title: `${channel.name}: ${text.slice(0, 100)}`,
         description: text,
         location: geolocateFromText(text),
         source: `Telegram / ${channel.name}`,
         url: `https://t.me/${m.postId}`,
-        category: categorizeNewsText(text, ""),
+        category,
+        secondaryCategories,
         timestamp: new Date(m.datetime).toISOString(),
       };
     });

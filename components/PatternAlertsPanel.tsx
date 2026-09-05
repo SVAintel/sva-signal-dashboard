@@ -40,6 +40,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   biological: "BIO",
   nuclear: "NUCLEAR",
   cyber: "CYBER",
+  general: "GENERAL",
 };
 
 function categoryLabel(category: string): string {
