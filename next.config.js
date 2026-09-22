@@ -3,6 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   compress: true,
+  distDir: process.env.SVA_NEXT_OUTPUT_DIR || ".next",
   // "ws" (used by the naval-vessel AIS route) relies on optional native
   // binary addons (bufferutil/utf-8-validate) that break when webpack tries
   // to bundle them into the serverless function — keep it as a real

@@ -1,15 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Landmark, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 interface NewsItem {
-  title: string;
-  description: string;
-  url: string;
-  image?: string;
-  source: string;
-  publishedAt: string;
+  title: string; description: string; url: string; image?: string; source: string; publishedAt: string;
 }
 
 export default function NewsPanel() {
@@ -17,135 +12,56 @@ export default function NewsPanel() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [lastFetchError, setLastFetchError] = useState<string | null>(null);
-
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const fetchNews = async () => {
       try {
         const response = await fetch("/api/news");
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-        const data = await response.json();
+        if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+        const data: NewsItem[] = await response.json();
         setNews(data.slice(0, 30));
         setLastUpdated(new Date());
-        setLastFetchError(null);
-      } catch (error) {
-        console.error("Failed to fetch news:", error);
-        setLastFetchError(
-          error instanceof Error ? error.message : "Failed to fetch news"
-        );
-      } finally {
-        setLoading(false);
-      }
+        setError(null);
+      } catch (err) {
+        console.error("Failed to fetch news:", err);
+        setError(err instanceof Error ? err.message : "Failed to fetch news");
+      } finally { setLoading(false); }
     };
-
     fetchNews();
-    const interval = setInterval(fetchNews, 300000); // Refresh every 5 minutes
+    const interval = setInterval(fetchNews, 300000);
     return () => clearInterval(interval);
   }, []);
-
-  const filteredNews = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return news;
-    return news.filter(
-      (item) =>
-        item.title?.toLowerCase().includes(q) ||
-        item.description?.toLowerCase().includes(q) ||
-        item.source?.toLowerCase().includes(q)
-    );
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return news.filter((item) => !term || [item.title, item.description, item.source].some((value) => value?.toLowerCase().includes(term)));
   }, [news, query]);
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0a0a] border-l border-[#3a3a3a]">
-      {/* Header */}
-      <div className="border-b border-[#3a3a3a] bg-[#0e0e0e] px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Landmark size={16} className="text-[#d4b36a]" />
-            <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Insights</h2>
-          </div>
-          <div className="relative w-[140px] shrink-0">
-            <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-600" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search reports..."
-              className="w-full rounded border border-[#3a3a3a] bg-[#111111] py-1 pl-7 pr-7 text-[10px] text-slate-200 placeholder:text-slate-600 focus:border-[#d4b36a]/50 focus:outline-none"
-            />
-            {query && (
-              <button
-                onClick={() => setQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300"
-                title="Clear search"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+    <div className="surface-panel">
+      <div className="surface-toolbar">
+        <p className="surface-muted mb-3">Policy research and reporting from think tanks. Read the original for full context.</p>
+        <div className="ledger-search">
+          <Search size={16} aria-hidden="true" />
+          <input aria-label="Search insight reports" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search these reports" />
+          {query && <button onClick={() => setQuery("")} aria-label="Clear report search"><X size={15} /></button>}
         </div>
-        <p className="text-[10px] text-slate-600 mt-1">Think Tank Reports & Policy Analysis</p>
-        {lastFetchError ? (
-          <p className="text-[10px] text-red-500 mt-1">
-            Update failed{lastUpdated ? ` — showing data from ${lastUpdated.toLocaleTimeString()}` : ""}: {lastFetchError}
-          </p>
-        ) : lastUpdated ? (
-          <p className="text-[10px] text-slate-700 mt-1">
-            Updated {lastUpdated.toLocaleTimeString()}
-          </p>
-        ) : null}
+        {error && <p className="surface-error" role="alert">Update failed{lastUpdated ? "; previous reports retained" : ""}: {error}</p>}
+        {lastUpdated && <p className="surface-updated">Fetched {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {filtered.length} reports</p>}
       </div>
-
-      {/* News Feed */}
-      <div className="flex-1 overflow-y-auto space-y-2 p-3">
-        {loading ? (
-          <div className="flex items-center justify-center h-full text-slate-500 text-xs">
-            Loading...
-          </div>
-        ) : filteredNews.length === 0 ? (
-          <div className="text-center text-slate-600 text-xs">
-            {query ? "No matching reports" : "No news available"}
-          </div>
-        ) : (
-          filteredNews.map((item, idx) => (
-            <a
-              key={idx}
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block p-2 rounded border border-[#3a3a3a] bg-[#111111] hover:bg-[#2a2a2a] transition hover:border-[#d4b36a]/50 group"
-            >
-              {item.image && (
-                <div className="mb-2 h-20 w-full overflow-hidden rounded bg-[#3a3a3a]">
-                  <img
-                    src={item.image}
-                    alt={item.title}
-                    loading="lazy"
-                    className="h-full w-full object-cover group-hover:scale-105 transition"
-                    onError={(e) => {
-                      // Some scraped/og:image URLs 403 or expire — hide the
-                      // broken image box instead of showing a broken-icon.
-                      (e.currentTarget.closest("div") as HTMLElement).style.display = "none";
-                    }}
-                  />
-                </div>
-              )}
-              <h3 className="text-xs font-semibold text-slate-200 line-clamp-2 group-hover:text-[#d4b36a] transition">
-                {item.title}
-              </h3>
-              <p className="text-[10px] text-slate-500 mt-1 line-clamp-1">{item.description}</p>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-[9px] text-[#d4b36a] font-mono">{item.source}</span>
-                <span className="text-[9px] text-slate-600">
-                  {new Date(item.publishedAt).toLocaleTimeString()}
-                </span>
-              </div>
-            </a>
-          ))
-        )}
+      <div className="surface-scroll">
+        {loading ? <p className="surface-muted p-5" role="status">Loading reports...</p> : filtered.length === 0 ? (
+          <p className="surface-muted p-5">{query ? "No reports match this search." : error ? "Reports are unavailable. An update will be retried automatically." : "No reports are available."}</p>
+        ) : filtered.map((item, index) => (
+          <a key={`${item.url}-${index}`} href={item.url} target="_blank" rel="noopener noreferrer" className="report-row">
+            <div className="report-row-top">
+              <h3>{item.title}</h3>
+              {item.image && <img src={item.image} alt="" loading="lazy" onError={(event) => { event.currentTarget.hidden = true; }} />}
+            </div>
+            <p className="line-clamp-2">{item.description}</p>
+            <div className="report-meta"><span>{item.source}</span><time dateTime={item.publishedAt}>{new Date(item.publishedAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</time></div>
+          </a>
+        ))}
       </div>
     </div>
   );
 }
-

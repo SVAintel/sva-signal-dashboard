@@ -1,274 +1,112 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { DollarSign, Activity } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
-interface CurrencyData {
-  code: string;
-  rate: number;
-  changePct: number;
-}
+interface CurrencyData { code: string; rate: number; changePct: number; }
+interface MarketHealthData { symbol: string; label: string; color: string; price: number; change: number; changePercent: number; }
+type HistoryPoint = { time: string; [symbol: string]: string | number };
+const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+const changeClass = (value: number) => value >= 0 ? "market-positive" : "market-negative";
 
-interface MarketHealthData {
-  symbol: string;
-  label: string;
-  color: string;
-  price: number;
-  change: number;
-  changePercent: number;
+function MarketSeries({ quotes, history }: { quotes: MarketHealthData[]; history: HistoryPoint[] }) {
+  return <>
+    <table className="market-table">
+      <thead><tr><th scope="col">Instrument</th><th scope="col">USD</th><th scope="col">Change</th></tr></thead>
+      <tbody>{quotes.map((quote) => <tr key={quote.symbol}>
+        <td><span className="market-series-key" style={{ background: quote.color }} />{quote.label}</td>
+        <td>{quote.price.toFixed(2)}</td><td className={changeClass(quote.changePercent)}>{percent(quote.changePercent)}</td>
+      </tr>)}</tbody>
+    </table>
+    {history.length > 0 && <div className="market-chart" role="img" aria-label="Percentage change from seven days ago, by instrument">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={history} margin={{ top: 6, right: 4, bottom: 6, left: 0 }}>
+          <CartesianGrid stroke="#303d42" vertical={false} />
+          <XAxis dataKey="time" stroke="#98a5a8" fontSize={11} minTickGap={22} tickLine={false} />
+          <YAxis width={48} stroke="#98a5a8" fontSize={11} tickFormatter={(value) => `${value}%`} tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={{ background: "#172126", border: "1px solid #495956", fontSize: 12 }} labelStyle={{ color: "#c6ac77" }} formatter={(value) => `${value}%`} />
+          {quotes.map((quote) => <Line key={quote.symbol} type="monotone" dataKey={quote.symbol} name={quote.label} stroke={quote.color} strokeWidth={1.5} dot={false} isAnimationActive={false} />)}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>}
+  </>;
 }
 
 export default function StockMarketPanel() {
   const [currencies, setCurrencies] = useState<CurrencyData[]>([]);
-  const [usdIndexChange, setUsdIndexChange] = useState(0);
+  const [usdIndexChange, setUsdIndexChange] = useState<number | null>(null);
   const [fxLoading, setFxLoading] = useState(true);
+  const [fxError, setFxError] = useState("");
   const [marketHealth, setMarketHealth] = useState<MarketHealthData[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [riskIndicators, setRiskIndicators] = useState<MarketHealthData[]>([]);
-  const [riskHistory, setRiskHistory] = useState<any[]>([]);
+  const [riskHistory, setRiskHistory] = useState<HistoryPoint[]>([]);
   const [healthLoading, setHealthLoading] = useState(true);
-
+  const [healthError, setHealthError] = useState("");
   useEffect(() => {
     const fetchForexData = async () => {
       try {
         const response = await fetch("/api/forex");
-        const forexData = await response.json();
-        setCurrencies(forexData.currencies || []);
-        setUsdIndexChange(forexData.usdIndexChange || 0);
+        if (!response.ok) throw new Error(`Currency request failed (${response.status})`);
+        const data = await response.json();
+        setCurrencies(data.currencies || []);
+        setUsdIndexChange(typeof data.usdIndexChange === "number" ? data.usdIndexChange : null);
+        setFxError("");
       } catch (error) {
-        console.error("Failed to fetch forex data:", error);
-      } finally {
-        setFxLoading(false);
-      }
+        setFxError(error instanceof Error ? error.message : "Currency data could not be loaded.");
+      } finally { setFxLoading(false); }
     };
-
     fetchForexData();
-    const interval = setInterval(fetchForexData, 6 * 60 * 60000); // Refresh every 6h — rates only update daily
+    const interval = setInterval(fetchForexData, 6 * 60 * 60000);
     return () => clearInterval(interval);
   }, []);
-
   useEffect(() => {
     const fetchMarketHealth = async () => {
       try {
         const response = await fetch("/api/market-health");
-        const healthData = await response.json();
-        setMarketHealth(healthData.indexes || []);
-        setHistory(healthData.history || []);
-        setRiskIndicators(healthData.riskIndicators || []);
-        setRiskHistory(healthData.riskHistory || []);
+        if (!response.ok) throw new Error(`Market request failed (${response.status})`);
+        const data = await response.json();
+        setMarketHealth(data.indexes || []);
+        setHistory(data.history || []);
+        setRiskIndicators(data.riskIndicators || []);
+        setRiskHistory(data.riskHistory || []);
+        setHealthError("");
       } catch (error) {
-        console.error("Failed to fetch market health data:", error);
-      } finally {
-        setHealthLoading(false);
-      }
+        setHealthError(error instanceof Error ? error.message : "Market data could not be loaded.");
+      } finally { setHealthLoading(false); }
     };
-
     fetchMarketHealth();
-    const interval = setInterval(fetchMarketHealth, 6 * 60 * 60000); // Refresh every 6h — Alpha Vantage quota
+    const interval = setInterval(fetchMarketHealth, 6 * 60 * 60000);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-[#0a0a0a] border-l border-[#3a3a3a]">
-      {/* US Market Health */}
-      <div className="border-b border-[#3a3a3a] bg-[#0e0e0e] px-4 py-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Activity size={16} className="text-[#d4b36a]" />
-          <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">US Market Health</h2>
-        </div>
-
-        {healthLoading ? (
-          <div className="text-slate-500 text-xs">Loading...</div>
-        ) : marketHealth.length === 0 ? (
-          <div className="text-slate-600 text-xs">No data available</div>
-        ) : (
-          <>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              {marketHealth.map((idx) => (
-                <div key={idx.symbol} className="bg-[#1a1a1a] rounded px-2 py-1.5">
-                  <div className="text-[9px] uppercase tracking-wide text-slate-500">{idx.label}</div>
-                  <div className="text-xs font-bold text-slate-200">${idx.price.toFixed(2)}</div>
-                  <div className={`text-[10px] font-mono ${idx.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {idx.changePercent >= 0 ? "+" : ""}{idx.changePercent.toFixed(2)}%
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="h-[160px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={history} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#3a3a3a" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    stroke="#64748b"
-                    style={{ fontSize: "10px" }}
-                    tick={{ fill: "#94a3b8" }}
-                  />
-                  <YAxis
-                    stroke="#64748b"
-                    style={{ fontSize: "10px" }}
-                    tick={{ fill: "#94a3b8" }}
-                    tickFormatter={(v) => `${v}%`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#111111",
-                      border: "1px solid #3a3a3a",
-                      borderRadius: "4px",
-                      fontSize: "11px",
-                    }}
-                    labelStyle={{ color: "#d4b36a" }}
-                    formatter={(value: any) => [`${value}%`, ""]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
-                  {marketHealth.map((idx) => (
-                    <Line
-                      key={idx.symbol}
-                      type="monotone"
-                      dataKey={idx.symbol}
-                      name={idx.label}
-                      stroke={idx.color}
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="text-[9px] text-slate-600 mt-1 leading-relaxed">
-              % change from 7 days ago (S&P 500 / Nasdaq / Dow via SPY/QQQ/DIA proxies).
-            </p>
-          </>
-        )}
+    <div className="surface-panel market-panel">
+      <div className="surface-toolbar">
+        <p className="surface-muted">Reference prices and market context, not a live trading feed. Data availability depends on upstream providers.</p>
+        {healthError && <p className="surface-error" role="alert">{healthError}{marketHealth.length ? " Previous quotes retained." : ""}</p>}
       </div>
-
-      {/* Risk & Safe-Haven Gauges */}
-      <div className="border-b border-[#3a3a3a] bg-[#0e0e0e] px-4 py-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Activity size={16} className="text-[#d4b36a]" />
-          <h2 className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Risk &amp; Safe-Haven Gauges</h2>
-        </div>
-
-        {healthLoading ? (
-          <div className="text-slate-500 text-xs">Loading...</div>
-        ) : riskIndicators.length === 0 ? (
-          <div className="text-slate-600 text-xs">No data available</div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              {riskIndicators.map((idx) => (
-                <div key={idx.symbol} className="bg-[#1a1a1a] rounded px-2 py-1.5">
-                  <div className="text-[9px] uppercase tracking-wide text-slate-500">{idx.label}</div>
-                  <div className="text-xs font-bold text-slate-200">${idx.price.toFixed(2)}</div>
-                  <div className={`text-[10px] font-mono ${idx.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {idx.changePercent >= 0 ? "+" : ""}{idx.changePercent.toFixed(2)}%
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="h-[160px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={riskHistory} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#3a3a3a" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    stroke="#64748b"
-                    style={{ fontSize: "10px" }}
-                    tick={{ fill: "#94a3b8" }}
-                  />
-                  <YAxis
-                    stroke="#64748b"
-                    style={{ fontSize: "10px" }}
-                    tick={{ fill: "#94a3b8" }}
-                    tickFormatter={(v) => `${v}%`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#111111",
-                      border: "1px solid #3a3a3a",
-                      borderRadius: "4px",
-                      fontSize: "11px",
-                    }}
-                    labelStyle={{ color: "#d4b36a" }}
-                    formatter={(value: any) => [`${value}%`, ""]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
-                  {riskIndicators.map((idx) => (
-                    <Line
-                      key={idx.symbol}
-                      type="monotone"
-                      dataKey={idx.symbol}
-                      name={idx.label}
-                      stroke={idx.color}
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <p className="text-[9px] text-slate-600 mt-1 leading-relaxed">
-              % change from 7 days ago. Oil/gold often move on conflict escalation (supply-route risk, flight to safety); VIXY tracks VIX futures as a volatility proxy (raw ^VIX unavailable on free tier); defense sector (ITA) often rallies on escalation ahead of headlines.
-            </p>
-          </>
-        )}
-      </div>
-
-      {/* Currency Strength */}
-      <div className="p-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <DollarSign size={13} className="text-[#d4b36a]" />
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#d4b36a]">USD Strength (7d)</h3>
-          </div>
-          <div className={`text-xs font-bold ${usdIndexChange >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {usdIndexChange >= 0 ? "+" : ""}{usdIndexChange}%
-          </div>
-        </div>
-
-        {fxLoading ? (
-          <div className="text-slate-500 text-xs">Loading currency data...</div>
-        ) : currencies.length === 0 ? (
-          <div className="text-slate-600 text-xs">No currency data available</div>
-        ) : (
-          <div className="space-y-1.5">
-            {[...currencies].sort((a, b) => b.changePct - a.changePct).map((c) => {
-              const magnitude = Math.min(Math.abs(c.changePct) * 20, 100);
-              return (
-                <div key={c.code} className="flex items-center gap-2 text-xs">
-                  <span className="w-10 shrink-0 font-mono text-slate-300">USD/{c.code}</span>
-                  <span className="w-16 shrink-0 font-mono text-slate-400 text-[10px]">{c.rate.toFixed(3)}</span>
-                  <div className="flex-1 h-2 bg-[#1f1f1f] rounded overflow-hidden flex">
-                    <div className="w-1/2 flex justify-end">
-                      {c.changePct < 0 && (
-                        <div className="h-full bg-red-500/70 rounded-l" style={{ width: `${magnitude}%` }} />
-                      )}
-                    </div>
-                    <div className="w-1/2 flex justify-start">
-                      {c.changePct >= 0 && (
-                        <div className="h-full bg-green-500/70 rounded-r" style={{ width: `${magnitude}%` }} />
-                      )}
-                    </div>
-                  </div>
-                  <span className={`w-12 shrink-0 text-right font-mono ${c.changePct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {c.changePct >= 0 ? "+" : ""}{c.changePct}%
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <p className="text-[9px] text-slate-600 mt-3 leading-relaxed">
-          % change in USD value vs. each currency over the past 7 days (ECB reference rates). Positive = dollar strengthened.
-        </p>
-      </div>
+      <section className="market-section">
+        <h2>US equity benchmarks</h2>
+        {healthLoading ? <p className="surface-muted" role="status">Loading prices...</p> : marketHealth.length ? <MarketSeries quotes={marketHealth} history={history} /> : <p className="surface-muted">No benchmark data available.</p>}
+        <p className="surface-muted">S&amp;P 500, Nasdaq and Dow represented by SPY, QQQ and DIA. Charts show change from seven days ago; table changes are the latest quoted session.</p>
+      </section>
+      <section className="market-section">
+        <h2>Risk and safe-haven proxies</h2>
+        {healthLoading ? <p className="surface-muted">Loading indicators...</p> : riskIndicators.length ? <MarketSeries quotes={riskIndicators} history={riskHistory} /> : <p className="surface-muted">No risk indicator data available.</p>}
+        <p className="surface-muted">Oil, gold, defense and VIX futures proxies. These instruments provide context, not evidence of a particular event. VIXY is not the spot VIX.</p>
+      </section>
+      <section className="market-section">
+        <h2>Dollar strength <span className="surface-muted">/ 7 days</span> {usdIndexChange !== null && <span className={changeClass(usdIndexChange)}>{percent(usdIndexChange)}</span>}</h2>
+        {fxError && <p className="surface-error" role="alert">{fxError}{currencies.length ? " Previous rates retained." : ""}</p>}
+        {fxLoading ? <p className="surface-muted" role="status">Loading exchange rates...</p> : currencies.length ? <table className="market-table">
+          <thead><tr><th scope="col">Pair</th><th scope="col">Rate</th><th scope="col">7-day change</th></tr></thead>
+          <tbody>{[...currencies].sort((a, b) => b.changePct - a.changePct).map((currency) => <tr key={currency.code}>
+            <td>USD / {currency.code}</td><td>{currency.rate.toFixed(3)}</td><td className={changeClass(currency.changePct)}>{percent(currency.changePct)}</td>
+          </tr>)}</tbody>
+        </table> : <p className="surface-muted">No currency data available.</p>}
+        <p className="surface-muted">ECB reference rates. A positive change means the dollar strengthened against that currency. Requests refresh every six hours; rates update daily.</p>
+      </section>
     </div>
   );
 }
-
-

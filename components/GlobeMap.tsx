@@ -462,6 +462,7 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 export default function GlobeMap({
   events,
+  reportGroupCounts = {},
   selectedEvent,
   onSelectEvent,
   activeLayers,
@@ -481,8 +482,11 @@ export default function GlobeMap({
   mobileVisible = true,
   selectedPort = null,
   onSelectPort,
+  scanEnabled = true,
+  reducedMotion = false,
 }: {
   events: Event[];
+  reportGroupCounts?: Record<string, number>;
   selectedEvent: Event | null;
   onSelectEvent: (event: Event) => void;
   activeLayers: MapLayers;
@@ -502,6 +506,8 @@ export default function GlobeMap({
   mobileVisible?: boolean;
   selectedPort?: PortFeature | null;
   onSelectPort?: (port: PortFeature) => void;
+  scanEnabled?: boolean;
+  reducedMotion?: boolean;
 }) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -629,9 +635,9 @@ export default function GlobeMap({
 
       const rotateClouds = () => {
         if (cloudMesh) cloudMesh.rotation.y += (CLOUDS_ROTATION_SPEED * Math.PI) / 180;
-        frameId = requestAnimationFrame(rotateClouds);
+        if (!reducedMotion) frameId = requestAnimationFrame(rotateClouds);
       };
-      frameId = requestAnimationFrame(rotateClouds);
+      if (!reducedMotion) frameId = requestAnimationFrame(rotateClouds);
     });
 
     return () => {
@@ -644,7 +650,7 @@ export default function GlobeMap({
         (cloudMesh.material as THREE.MeshBasicMaterial).dispose();
       }
     };
-  }, [globeReady]);
+  }, [globeReady, reducedMotion]);
 
   // Radar-style sweep, matching the 2D map's ScanSweep: a bright vertical
   // line pulses left-to-right across the view on a loop. When the sweep
@@ -654,7 +660,7 @@ export default function GlobeMap({
   // + fading title label, tracked every frame via the live globe projection
   // so it stays accurate as the camera orbits.
   useEffect(() => {
-    if (!globeReady) return;
+    if (!globeReady || !scanEnabled) return;
     const globe = globeRef.current;
     if (!globe) return;
     if (dimensions.width <= 0 || dimensions.height <= 0) return;
@@ -718,7 +724,7 @@ export default function GlobeMap({
 
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [globeReady, dimensions.width, dimensions.height, events]);
+  }, [globeReady, dimensions.width, dimensions.height, events, scanEnabled]);
 
   // Sweep out old flash entries so the array doesn't grow unbounded.
   useEffect(() => {
@@ -738,12 +744,12 @@ export default function GlobeMap({
     if (!globe) return;
 
     const controls = globe.controls();
-    controls.autoRotate = true;
+    controls.autoRotate = !reducedMotion;
     controls.autoRotateSpeed = 0.35;
     controls.enablePan = false;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-  }, [globeReady, dimensions.width, dimensions.height]);
+  }, [globeReady, dimensions.width, dimensions.height, reducedMotion]);
 
   // Pause auto-rotation whenever the user manipulates the globe (drag or
   // scroll-zoom), then resume it 3 seconds after they let go — this makes it
@@ -771,7 +777,7 @@ export default function GlobeMap({
       clearResumeTimer();
       resumeRotateTimeoutRef.current = setTimeout(() => {
         resumeRotateTimeoutRef.current = null;
-        if (!hasFocusRef.current) {
+        if (!hasFocusRef.current && !reducedMotion) {
           controls.autoRotate = true;
         }
       }, 10000);
@@ -784,7 +790,7 @@ export default function GlobeMap({
       controls.removeEventListener("end", handleEnd);
       clearResumeTimer();
     };
-  }, [globeReady]);
+  }, [globeReady, reducedMotion]);
 
   useEffect(() => {
     if (!globeReady) return;
@@ -826,17 +832,17 @@ export default function GlobeMap({
           lng: focusTarget.lng,
           altitude: focusTarget.altitude,
         },
-        900
+        reducedMotion ? 0 : 900
       );
       return;
     }
 
     hasFocusRef.current = false;
-    controls.autoRotate = true;
+    controls.autoRotate = !reducedMotion;
     const fallback = priorPointOfViewRef.current ?? DEFAULT_POV;
-    globe.pointOfView(fallback, 900);
+    globe.pointOfView(fallback, reducedMotion ? 0 : 900);
     priorPointOfViewRef.current = null;
-  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedPort?.name, selectedCountryName, countryFeatures]);
+  }, [globeReady, selectedEvent?.id, selectedMilitaryBase?.id, selectedFleetGroup?.id, selectedPort?.name, selectedCountryName, countryFeatures, reducedMotion]);
 
   // Close the marker popup once its "Expand" button hands off to the real
   // detail panel (selectedEvent/selectedMilitaryBase/selectedCountryName
@@ -982,7 +988,7 @@ export default function GlobeMap({
       lng: event.location.lng,
       altitude: FLAT_ALTITUDE,
       color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.general,
-      size: 14,
+      size: selectedEvent?.id === event.id ? 13 : 9,
       label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
       kind: "event",
       event,
@@ -1037,7 +1043,7 @@ export default function GlobeMap({
     }
 
     return markers;
-  }, [events, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups, activeLayers.ports, portsToRender]);
+  }, [events, selectedEvent?.id, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups, activeLayers.ports, portsToRender]);
 
   // Kept in sync (below, on every render) so the proximity-click handler
   // effect can read the latest markers without needing to reattach its
@@ -1264,7 +1270,7 @@ export default function GlobeMap({
   // larger, slower focus ring for the selected event remains here (mirrors
   // the 2D map's bigger EventPingRings focus effect).
   const ringData = useMemo<RingDatum[]>(() => {
-    if (!selectedEvent) return [];
+    if (!selectedEvent || reducedMotion) return [];
     const color = CATEGORY_COLORS[selectedEvent.category] || CATEGORY_COLORS.general;
     return [
       {
@@ -1277,7 +1283,7 @@ export default function GlobeMap({
         repeatPeriod: 1150,
       },
     ];
-  }, [selectedEvent]);
+  }, [selectedEvent, reducedMotion]);
 
   if (!mobileVisible) {
     return <div className="h-full w-full" style={{ display: "none" }} />;
@@ -1285,14 +1291,6 @@ export default function GlobeMap({
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-[#050505]">
-      {/* Thin static grid overlay, matching the 2D map's radar-style grid */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(to right, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px), repeating-linear-gradient(to bottom, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px)",
-        }}
-      />
       {dimensions.width > 0 && dimensions.height > 0 && (
         <Globe
           ref={globeRef}
@@ -1326,8 +1324,7 @@ export default function GlobeMap({
             el.title = marker.label;
             el.innerHTML = `
               <div class="globe-marker-tap-hit-area"></div>
-              <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${marker.color};"></div>
-              <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${marker.color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${marker.color};"></div>
+              <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${marker.color};border:1px solid #e0ded0;"></div>
             `;
             el.addEventListener("click", (evt) => {
               evt.stopPropagation();
@@ -1491,6 +1488,7 @@ export default function GlobeMap({
                     </div>
                     <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>{popupTarget.event.title}</div>
                     <div style={{ color: "#64748b", fontSize: "11px" }}>{popupTarget.event.source}</div>
+                    {reportGroupCounts[popupTarget.event.id] > 1 && <div className="map-incident-label">{reportGroupCounts[popupTarget.event.id]} reports in a likely incident group</div>}
                   </>
                 ) : popupTarget.kind === "militaryBase" && popupTarget.base ? (
                   <>
@@ -1584,7 +1582,7 @@ export default function GlobeMap({
         })()}
       {/* Sweeping line — thin bright core + soft wide glow trailing behind
           it, matching the 2D map's ScanSweep bar exactly. */}
-      <div
+      {scanEnabled && <div
         ref={sweepBarRef}
         className="pointer-events-none absolute top-0 bottom-0 z-10"
         style={{ left: -60, width: 120, willChange: "transform" }}
@@ -1602,12 +1600,12 @@ export default function GlobeMap({
             boxShadow: "0 0 16px 3px rgba(212,179,106,0.6)",
           }}
         />
-      </div>
+      </div>}
       {/* Reveal flashes — positioned via a direct ref + transform, updated
           every animation frame from the live globe projection, so they
           track the camera's orbit instead of staying pinned to stale
           screen coordinates from when they fired. */}
-      {sweepFlashes.map((f) => (
+      {scanEnabled && sweepFlashes.map((f) => (
         <div
           key={f.id}
           ref={(el) => {

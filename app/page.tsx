@@ -16,7 +16,7 @@ export default function Home() {
   if (!mounted) return null;
 
   return (
-    <main className="min-h-screen bg-slate-900">
+    <main className="min-h-screen">
       {!dashboardActive ? <LandingPage /> : <Dashboard />}
     </main>
   );

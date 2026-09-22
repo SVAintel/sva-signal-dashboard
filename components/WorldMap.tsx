@@ -1,9 +1,10 @@
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Tooltip, useMap, AttributionControl } from "react-leaflet";
+import { MapContainer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Tooltip, useMap, AttributionControl } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
+import { categoryMeta } from "@/lib/categories";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
@@ -11,18 +12,20 @@ import type { PortDetail } from "@/lib/data/port-details";
 import type { FleetGroup } from "./FleetTrackerDetailPanel";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MapLibreTileLayer } from "./MapLibreTileLayer";
 
-const makeIcon = (color: string) =>
-  new L.DivIcon({
+const makeIcon = (color: string, selected = false) => {
+  const size = selected ? 13 : 9;
+  return new L.DivIcon({
     className: "",
-    html: `<div style="position:relative;width:14px;height:14px;">
+    html: `<div style="position:relative;width:${size}px;height:${size}px;">
       <div class="marker-tap-hit-area"></div>
-      <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:${color};"></div>
-      <div style="position:relative;width:14px;height:14px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.6);box-shadow:0 0 8px ${color};"></div>
+      <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${color};border:1px solid #e0ded0;${selected ? "outline:2px solid #e0ded0;outline-offset:3px;" : ""}"></div>
     </div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
+};
 
 const icons: Record<string, L.DivIcon> = {
   war: makeIcon("#ef4444"),
@@ -37,6 +40,10 @@ const icons: Record<string, L.DivIcon> = {
   humanitarian: makeIcon("#f43f5e"),
   general: makeIcon("#94a3b8"),
 };
+
+const selectedIcons = Object.fromEntries(
+  Object.entries(categoryMeta).map(([category, meta]) => [category, makeIcon(meta.color, true)])
+);
 
 // Naval vessel marker: a small square/diamond in slate-blue to visually
 // distinguish AIS-tracked ships from category event markers, with a heading
@@ -363,21 +370,17 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
   const map = useMap();
 
   useEffect(() => {
-    // Leaflet's world tiles are always square (Web Mercator): worldWidth = worldHeight = 256 * 2^zoom.
-    // fitBounds "contains" the whole square, which letterboxes when the container is wider than tall
-    // (our case, since the sidebar makes the map panel landscape). Instead, compute zoom so the
-    // world's width exactly matches the container's width — this crops slightly near the poles
-    // (empty ocean/ice, no data there) but eliminates the side bars entirely.
+    // Cover the viewport without repeating the world or exposing empty tile edges.
     let isFirstRun = true;
 
     const fitToContainerWidth = () => {
       const size = map.getSize();
       if (size.x === 0 || size.y === 0) return;
-      const zoom = Math.log2(size.x / 256);
+      const zoom = Math.log2(Math.max(size.x, size.y) / 256);
       map.setMinZoom(zoom);
 
       if (isFirstRun) {
-        map.setView([0, 0], zoom, { animate: false });
+        map.setView([20, 0], zoom, { animate: false });
         isFirstRun = false;
       } else if (map.getZoom() < zoom) {
         map.setZoom(zoom, { animate: false });
@@ -387,10 +390,13 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
     fitToContainerWidth();
     map.on("resize", fitToContainerWidth);
     window.addEventListener("resize", fitToContainerWidth);
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    observer.observe(map.getContainer());
 
     return () => {
       map.off("resize", fitToContainerWidth);
       window.removeEventListener("resize", fitToContainerWidth);
+      observer.disconnect();
     };
   }, [map]);
 
@@ -402,41 +408,13 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
       map.invalidateSize();
       const size = map.getSize();
       if (size.x > 0 && size.y > 0) {
-        const zoom = Math.log2(size.x / 256);
+        const zoom = Math.log2(Math.max(size.x, size.y) / 256);
         map.setMinZoom(zoom);
         if (map.getZoom() < zoom) map.setZoom(zoom, { animate: false });
       }
     });
     return () => cancelAnimationFrame(id);
   }, [visible, map]);
-
-  return null;
-}
-
-// Flies the map to a selected event's location and zooms in, so opening the
-// detail panel visually centers the underlying story on the map instead of
-// leaving the user to hunt for it among other markers. Restores the prior
-// view (center + zoom) when the detail panel is closed.
-function MapEventFocuser({ event }: { event: Event | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
-
-  useEffect(() => {
-    if (event) {
-      // Only snapshot the view the first time we focus (not on every event
-      // change while the panel stays open) so closing always returns to
-      // where the user was before they started exploring events.
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const targetZoom = Math.max(map.getZoom(), 6);
-      map.flyTo([event.location.lat, event.location.lng], targetZoom, { duration: 0.9 });
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
-    }
-  }, [event?.id, map]);
 
   return null;
 }
@@ -821,15 +799,6 @@ function ScanSweep({
       ref={anchorRef}
       style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", overflow: "hidden" }}
     >
-      {/* Thin static grid */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage:
-            "repeating-linear-gradient(to right, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px), repeating-linear-gradient(to bottom, rgba(212,179,106,0.06) 0px, rgba(212,179,106,0.06) 1px, transparent 1px, transparent 44px)",
-        }}
-      />
       {/* Sweeping line — thin bright core + soft wide glow trailing behind it */}
       <div
         ref={barRef}
@@ -915,75 +884,6 @@ function ScanSweep({
   );
 }
 
-// Flies the map to a selected military base's location and zooms in, so
-// opening the detail panel visually centers the installation on the map.
-// Mirrors MapEventFocuser's behavior/restore-on-close pattern.
-function MapMilitaryBaseFocuser({ base }: { base: MilitaryBaseData | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
-
-  useEffect(() => {
-    if (base) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const targetZoom = Math.max(map.getZoom(), 6);
-      map.flyTo([base.lat, base.lng], targetZoom, { duration: 0.9 });
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
-    }
-  }, [base?.id, map]);
-
-  return null;
-}
-
-// Flies the map to a selected fleet-tracker group's approximate region and
-// zooms in, mirroring MapMilitaryBaseFocuser.
-function MapFleetGroupFocuser({ group }: { group: FleetGroup | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
-
-  useEffect(() => {
-    if (group) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const targetZoom = Math.max(map.getZoom(), 4);
-      map.flyTo([group.lat, group.lng], targetZoom, { duration: 0.9 });
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
-    }
-  }, [group?.id, map]);
-
-  return null;
-}
-
-// Flies the map to a selected port and zooms in, mirroring MapMilitaryBaseFocuser.
-function MapPortFocuser({ port }: { port: PortFeature | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
-
-  useEffect(() => {
-    if (port) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const targetZoom = Math.max(map.getZoom(), 6);
-      map.flyTo([port.lat, port.lng], targetZoom, { duration: 0.9 });
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
-    }
-  }, [port?.name, map]);
-
-  return null;
-}
-
 // Picks the bounds of a country's largest contiguous landmass, ignoring
 // smaller disjoint parts (e.g. France's MultiPolygon includes French Guiana,
 // Réunion, Guadeloupe, etc. — fitting the full bounding box would center the
@@ -1012,86 +912,97 @@ function getPrimaryLandmassBounds(feature: CountryFeature): L.LatLngBounds | nul
   return bestBounds;
 }
 
-// Flies the map to fit a selected country's actual border shape and zooms
-// in, mirroring MapEventFocuser/MapMilitaryBaseFocuser. Uses flyToBounds
-// (rather than a single flyTo point) since countries vary hugely in size —
-// this fits the whole shape in view instead of zooming to a fixed level.
-function MapCountryFocuser({ feature }: { feature: CountryFeature | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+type CameraTarget = { center: L.LatLngTuple; zoom: number } | { bounds: L.LatLngBounds };
 
-  useEffect(() => {
-    if (feature) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const bounds = getPrimaryLandmassBounds(feature);
-      if (bounds && bounds.isValid()) {
-        map.flyToBounds(bounds, { duration: 0.9, padding: [40, 40], maxZoom: 6 });
-      }
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
+function MapSelectionFocuser({ event, base, group, port, country, zone, cluster, visible, reducedMotion }: {
+  event: Event | null; base: MilitaryBaseData | null; group: FleetGroup | null;
+  port: PortFeature | null; country: CountryFeature | null; zone: ConflictZoneOutput | null;
+  cluster: { id: string; lat: number; lng: number } | null; visible: boolean; reducedMotion: boolean;
+}) {
+  const map = useMap();
+  const priorView = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+  const target = useMemo<CameraTarget | null>(() => {
+    if (event) return { center: [event.location.lat, event.location.lng], zoom: 6 };
+    if (base) return { center: [base.lat, base.lng], zoom: 6 };
+    if (group) return { center: [group.lat, group.lng], zoom: 4 };
+    if (port) return { center: [port.lat, port.lng], zoom: 6 };
+    if (country) {
+      const bounds = getPrimaryLandmassBounds(country);
+      if (bounds?.isValid()) return { bounds };
     }
-  }, [feature, map]);
-
-  return null;
-}
-
-// Flies the map to fit a selected conflict zone's shape and zooms in,
-// mirroring MapCountryFocuser. Conflict zones are always a single
-// contiguous region (no disjoint overseas-territory case like countries),
-// so this just fits the combined bounds of the whole MultiPolygon.
-function MapConflictZoneFocuser({ zone }: { zone: ConflictZoneOutput | null }) {
-  const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
-
-  useEffect(() => {
     if (zone) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const bounds = L.geoJSON(zone.geometry as any).getBounds();
-      if (bounds.isValid()) {
-        map.flyToBounds(bounds, { duration: 0.9, padding: [40, 40], maxZoom: 6 });
-      }
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
+      const bounds = L.geoJSON(zone.geometry as GeoJSON.GeoJsonObject).getBounds();
+      if (bounds.isValid()) return { bounds };
     }
-  }, [zone?.id, map]);
-
+    if (cluster) return { center: [cluster.lat, cluster.lng], zoom: 5 };
+    return null;
+  }, [event, base, group, port, country, zone, cluster]);
+  useEffect(() => {
+    map.stop();
+    if (!visible) return;
+    // MapFitter remeasures a newly visible phone map before this frame runs.
+    const frame = requestAnimationFrame(() => {
+      if (!map.getSize().x || !map.getSize().y) return;
+      const options = { duration: 0.9, animate: !reducedMotion };
+      if (target) {
+        if (!priorView.current) priorView.current = { center: map.getCenter(), zoom: map.getZoom() };
+        if ("bounds" in target) map.flyToBounds(target.bounds, { ...options, padding: [40, 40], maxZoom: 6 });
+        else map.flyTo(target.center, Math.max(map.getZoom(), target.zoom), options);
+      } else if (priorView.current) {
+        map.flyTo(priorView.current.center, priorView.current.zoom, options);
+        priorView.current = null;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [map, target, visible, reducedMotion]);
   return null;
 }
 
-// Flies the map to a selected Pattern Alert cluster's centroid, mirroring
-// MapEventFocuser. Takes a plain lat/lng + id rather than a full Event since
-// clusters are a synthesized aggregate (not a single Event record).
-function MapClusterFocuser({ cluster }: { cluster: { id: string; lat: number; lng: number } | null }) {
+// Keep pointer updates inside the map rather than rerendering the workspace.
+function MapCoordinateReadout() {
   const map = useMap();
-  const priorViewRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+  const [coord, setCoord] = useState<{ lat: number; lng: number } | null>(null);
+  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (cluster) {
-      if (!priorViewRef.current) {
-        priorViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
-      }
-      const targetZoom = Math.max(map.getZoom(), 5);
-      map.flyTo([cluster.lat, cluster.lng], targetZoom, { duration: 0.9 });
-    } else if (priorViewRef.current) {
-      const { center, zoom } = priorViewRef.current;
-      map.flyTo(center, zoom, { duration: 0.9 });
-      priorViewRef.current = null;
-    }
-  }, [cluster?.id, map]);
+    const onMove = (e: L.LeafletMouseEvent) => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      const nextCoord = { lat: e.latlng.lat, lng: e.latlng.lng };
+      frameRef.current = requestAnimationFrame(() => {
+        setCoord(nextCoord);
+        frameRef.current = null;
+      });
+    };
+    const onLeave = () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      setCoord(null);
+    };
+    map.on("mousemove", onMove);
+    map.on("mouseout", onLeave);
+    return () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      map.off("mousemove", onMove);
+      map.off("mouseout", onLeave);
+    };
+  }, [map]);
 
-  return null;
+  if (!coord) return null;
+
+  const lat = `${Math.abs(coord.lat).toFixed(3)}°${coord.lat >= 0 ? "N" : "S"}`;
+  const lng = `${Math.abs(coord.lng).toFixed(3)}°${coord.lng >= 0 ? "E" : "W"}`;
+
+  return createPortal(
+    <div className="map-coord-readout font-mono">
+      {lat} &nbsp;{lng}
+    </div>,
+    map.getContainer()
+  );
 }
 
 export default function WorldMap({
   events,
+  reportGroupCounts = {},
   selectedEvent,
   onSelectEvent,
   activeLayers,
@@ -1113,8 +1024,11 @@ export default function WorldMap({
   selectedPort = null,
   onSelectPort,
   selectedCluster = null,
+  scanEnabled = true,
+  reducedMotion = false,
 }: {
   events: Event[];
+  reportGroupCounts?: Record<string, number>;
   selectedEvent: Event | null;
   onSelectEvent: (event: Event) => void;
   activeLayers: MapLayers;
@@ -1136,6 +1050,8 @@ export default function WorldMap({
   selectedPort?: PortFeature | null;
   onSelectPort?: (port: PortFeature) => void;
   selectedCluster?: { id: string; lat: number; lng: number } | null;
+  scanEnabled?: boolean;
+  reducedMotion?: boolean;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
@@ -1199,13 +1115,10 @@ export default function WorldMap({
     >
       <AttributionControl prefix={false} />
       <MapFitter visible={mobileVisible} />
-      <MapEventFocuser event={selectedEvent} />
-      <MapMilitaryBaseFocuser base={selectedMilitaryBase} />
-      <MapFleetGroupFocuser group={selectedFleetGroup} />
-      <MapPortFocuser port={selectedPort} />
-      <MapCountryFocuser feature={selectedCountryFeature} />
-      <MapConflictZoneFocuser zone={selectedConflictZone} />
-      <MapClusterFocuser cluster={selectedCluster} />
+      <MapSelectionFocuser visible={mobileVisible} reducedMotion={reducedMotion}
+        event={selectedEvent} base={selectedMilitaryBase} group={selectedFleetGroup} port={selectedPort}
+        country={selectedCountryFeature} zone={selectedConflictZone} cluster={selectedCluster} />
+      <MapCoordinateReadout />
       {selectedCluster && (
         <Circle
           center={[selectedCluster.lat, selectedCluster.lng]}
@@ -1213,13 +1126,10 @@ export default function WorldMap({
           pathOptions={{ color: "#d4b36a", weight: 2, fillColor: "#d4b36a", fillOpacity: 0.08, dashArray: "6 6" }}
         />
       )}
-      <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />
-      <TileLayer
-        url={`https://basemaps.cartocdn.com/rastertiles/dark_nolabels/{z}/{x}/{y}${
-          typeof window !== "undefined" && window.devicePixelRatio > 1 ? "@2x" : ""
-        }.png?key=${process.env.NEXT_PUBLIC_CARTO_API_KEY || ""}`}
-        attribution='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        noWrap={true}
+      {scanEnabled && <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />}
+      <MapLibreTileLayer
+        styleUrl="https://tiles.openfreemap.org/styles/dark"
+        attribution='<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
       />
       {activeLayers.countries &&
         countryFeatures.map((feature) => {
@@ -1227,7 +1137,7 @@ export default function WorldMap({
           const isSelected = name === selectedCountryName;
           const baseStyle = isSelected
             ? { color: "#d4b36a", weight: 2.5, fillColor: "#d4b36a", fillOpacity: 0.05, className: "country-border-path" }
-            : { color: "#64748b", weight: 1, fillColor: "#64748b", fillOpacity: 0.02, className: "country-border-path" };
+            : { color: "#7f8c82", weight: 0.65, fillColor: "#64748b", fillOpacity: 0, className: "country-border-path" };
           return (
             <GeoJSON
               key={name}
@@ -1597,7 +1507,7 @@ export default function WorldMap({
         <Marker
           key={event.id}
           position={[event.location.lat, event.location.lng]}
-          icon={icons[event.category] || icons.general}
+          icon={selectedEvent?.id === event.id ? selectedIcons[event.category] || selectedIcons.general : icons[event.category] || icons.general}
           ref={(m) => {
             if (m) markerRefs.current.set(event.id, m);
             else markerRefs.current.delete(event.id);
@@ -1620,6 +1530,7 @@ export default function WorldMap({
               </div>
               <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{event.title}</div>
               <div style={{ color: "#64748b", fontSize: "11px" }}>{event.source}</div>
+              {reportGroupCounts[event.id] > 1 && <div className="map-incident-label">{reportGroupCounts[event.id]} reports in a likely incident group</div>}
               <button
                 onClick={() => {
                   // Close the popup immediately — the map is about to fly/zoom
@@ -1650,7 +1561,7 @@ export default function WorldMap({
           </Popup>
         </Marker>
       ))}
-      <EventPingRings event={selectedEvent} />
+      {!reducedMotion && <EventPingRings event={selectedEvent} />}
     </MapContainer>
   );
 }

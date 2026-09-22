@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import DetailFrame from "./DetailFrame";
 import type { CountryDetail } from "@/lib/data/country-details";
 
 export interface CountryData {
@@ -110,34 +110,20 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
   const details = country.details;
 
   return (
-    <div className="absolute inset-y-0 right-0 z-[1200] flex w-full max-w-full sm:max-w-[420px] pointer-events-none">
-      <div className="pointer-events-auto flex h-full w-full flex-col overflow-y-auto border-l border-[#d4b36a]/30 bg-[#0e0e0ef5] shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#0f0f0f] px-5 py-4">
-          <div className="flex-1 pr-2">
-            <div className="mb-2 flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full" style={{ background: "#d4b36a", boxShadow: "0 0 8px #d4b36a" }} />
-              <span className="text-xs font-bold uppercase text-[#d4b36a]">Country Profile</span>
-            </div>
-            <h1 className="text-lg font-bold leading-snug text-slate-100">🗺️ {country.name}</h1>
-          </div>
-          <button onClick={onClose} className="shrink-0 rounded p-2 text-slate-400 transition hover:bg-[#262626] hover:text-[#d4b36a]">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-6 p-5">
-          <div className="rounded border border-sky-700/40 bg-sky-950/10 p-4">
+    <DetailFrame title={country.name} eyebrow={"Country profile / Reference"} onClose={onClose}>
+        <div className="detail-content">
+          <div className="detail-section">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="flex items-center gap-2 text-sm font-bold uppercase text-sky-400">
+              <h2 className="flex items-center gap-2 text-sm font-medium text-sky-400">
                 <span className="h-2 w-2 rounded-full bg-sky-400" />
                 7-Day Regional Brief
               </h2>
               <button
                 onClick={generateBrief}
                 disabled={briefLoading}
-                className={`shrink-0 rounded border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition ${
+                className={`shrink-0 rounded border px-3 py-1.5 text-[11px] font-medium transition ${
                   briefLoading
-                    ? "cursor-not-allowed border-slate-700 text-slate-600"
+                    ? "cursor-not-allowed border-slate-700 text-[color:var(--desk-muted)]"
                     : "border-sky-500 text-sky-400 hover:bg-sky-950/40"
                 }`}
               >
@@ -149,8 +135,8 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
 
             {brief ? (
               <>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{brief.brief}</p>
-                <p className="mt-3 text-[10px] text-slate-500">
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[color:var(--desk-text)]">{brief.brief}</p>
+                <p className="mt-3 text-[11px] text-[color:var(--desk-muted)]">
                   Synthesized from {brief.eventCount} tracked event{brief.eventCount === 1 ? "" : "s"}
                   {brief.fleetMatchCount > 0
                     ? ` and ${brief.fleetMatchCount} nearby fleet group${brief.fleetMatchCount === 1 ? "" : "s"}`
@@ -168,88 +154,88 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 border-b border-[#3a3a3a] pb-4 sm:grid-cols-3">
+          <div className="detail-facts">
             <div>
-              <p className="text-xs font-semibold uppercase text-slate-600">Capital</p>
-              <p className="mt-1 text-sm text-slate-200">{details?.capital || "N/A"}</p>
+              <p className="text-xs font-medium text-[color:var(--desk-muted)]">Capital</p>
+              <p className="mt-1 text-sm text-[color:var(--desk-text)]">{details?.capital || "N/A"}</p>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase text-slate-600">Population</p>
-              <p className="mt-1 text-sm text-slate-200">{details?.population || "N/A"}</p>
+              <p className="text-xs font-medium text-[color:var(--desk-muted)]">Population</p>
+              <p className="mt-1 text-sm text-[color:var(--desk-text)]">{details?.population || "N/A"}</p>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase text-slate-600">GDP</p>
-              <p className="mt-1 text-sm text-slate-200">{details?.gdp || "N/A"}</p>
+              <p className="text-xs font-medium text-[color:var(--desk-muted)]">GDP</p>
+              <p className="mt-1 text-sm text-[color:var(--desk-text)]">{details?.gdp || "N/A"}</p>
             </div>
           </div>
 
           {details ? (
             <>
               <div>
-                <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Summary</h2>
-                <p className="text-sm leading-relaxed text-slate-300">{details.summary}</p>
+                <h2 className="mb-3 text-sm font-medium text-[color:var(--desk-accent)]">Summary</h2>
+                <p className="text-sm leading-relaxed text-[color:var(--desk-text)]">{details.summary}</p>
               </div>
 
-              <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-                <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase text-[#d4b36a]">
+              <div className="detail-section">
+                <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[color:var(--desk-accent)]">
                   <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
                   Government & Politics
                 </h2>
-                <ul className="space-y-2 text-sm text-slate-300">
+                <ul className="space-y-2 text-sm text-[color:var(--desk-text)]">
                   <li>
-                    <span className="text-slate-500">Type: </span>
+                    <span className="text-[color:var(--desk-muted)]">Type: </span>
                     {details.governmentType}
                   </li>
                   <li>
-                    <span className="text-slate-500">Ruling parties: </span>
+                    <span className="text-[color:var(--desk-muted)]">Ruling parties: </span>
                     {details.rulingParties}
                   </li>
                 </ul>
               </div>
 
-              <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-                <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase text-[#d4b36a]">
+              <div className="detail-section">
+                <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[color:var(--desk-accent)]">
                   <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
                   Economy
                 </h2>
-                <p className="mb-2 text-sm text-slate-300">
-                  <span className="text-slate-500">Major exports: </span>
+                <p className="mb-2 text-sm text-[color:var(--desk-text)]">
+                  <span className="text-[color:var(--desk-muted)]">Major exports: </span>
                   {details.majorExports.join(", ")}
                 </p>
-                <p className="text-sm text-slate-300">
-                  <span className="text-slate-500">Top trade partners: </span>
+                <p className="text-sm text-[color:var(--desk-text)]">
+                  <span className="text-[color:var(--desk-muted)]">Top trade partners: </span>
                   {details.topTradePartners.join(", ")}
                 </p>
               </div>
 
-              <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-                <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase text-[#d4b36a]">
+              <div className="detail-section">
+                <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[color:var(--desk-accent)]">
                   <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
                   Military
                 </h2>
                 <ul className="mb-2 space-y-1">
                   {details.militaryBranches.map((branch, idx) => (
-                    <li key={idx} className="flex gap-2 text-sm text-slate-300">
-                      <span className="text-[#d4b36a]">▸</span>
+                    <li key={idx} className="flex gap-2 text-sm text-[color:var(--desk-text)]">
+                      <span className="text-[color:var(--desk-accent)]">▸</span>
                       <span>{branch}</span>
                     </li>
                   ))}
                 </ul>
-                <p className="text-sm text-slate-300">
-                  <span className="text-slate-500">Active personnel: </span>
+                <p className="text-sm text-[color:var(--desk-text)]">
+                  <span className="text-[color:var(--desk-muted)]">Active personnel: </span>
                   {details.activePersonnel}
                 </p>
-                <p className="text-sm text-slate-300">
-                  <span className="text-slate-500">Defense budget: </span>
+                <p className="text-sm text-[color:var(--desk-text)]">
+                  <span className="text-[color:var(--desk-muted)]">Defense budget: </span>
                   {details.defenseBudget}
                 </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  <span className="text-slate-500">Alliances / partners: </span>
+                <p className="mt-2 text-sm text-[color:var(--desk-text)]">
+                  <span className="text-[color:var(--desk-muted)]">Alliances / partners: </span>
                   {details.alliances.join(", ")}
                 </p>
               </div>
 
-              <p className="text-[10px] leading-relaxed text-slate-600">
+              <p className="text-[11px] leading-relaxed text-[color:var(--desk-muted)]">
                 Figures are approximate, drawn from general public/unclassified sources — not an authoritative or
                 classified intelligence dataset.
               </p>
@@ -261,13 +247,13 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
             </p>
           )}
 
-          <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-            <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Country AI Q&A</h2>
+          <div className="detail-section">
+            <h2 className="mb-3 text-sm font-medium text-[color:var(--desk-accent)]">Country AI Q&A</h2>
 
-            <div className="max-h-72 space-y-3 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
+            <div className="detail-conversation">
               {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-                  <span className="mb-1 block font-bold uppercase tracking-widest text-[10px]">
+                <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-[color:var(--desk-text)]" : "text-[#e2c98b]"}`}>
+                  <span className="mb-1 block font-medium text-[11px]">
                     {msg.role === "assistant" ? "AI" : "You"}
                   </span>
                   <div className="space-y-2 leading-relaxed">
@@ -284,8 +270,8 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
                 </div>
               ))}
               {chatLoading && (
-                <div className="text-xs text-slate-500">
-                  <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">AI</span>
+                <div className="text-xs text-[color:var(--desk-muted)]">
+                  <span className="mr-2 font-medium text-[11px]">AI</span>
                   Thinking...
                 </div>
               )}
@@ -301,18 +287,19 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
               }}
             >
               <input
+                aria-label="Ask about this subject"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Ask about this country..."
-                className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
+                className="flex-1 rounded border border-[var(--desk-line)] bg-[var(--desk-raised)] px-3 py-2 text-xs text-[color:var(--desk-text)] placeholder:text-[color:var(--desk-muted)] focus:border-[#d4b36a] focus:outline-none"
               />
               <button
                 type="submit"
                 disabled={chatLoading || !chatInput.trim()}
-                className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
+                className={`rounded border px-3 py-2 text-[11px] font-medium transition ${
                   chatLoading || !chatInput.trim()
-                    ? "cursor-not-allowed border-slate-700 text-slate-600"
-                    : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
+                    ? "cursor-not-allowed border-slate-700 text-[color:var(--desk-muted)]"
+                    : "border-[#d4b36a] text-[color:var(--desk-accent)] hover:bg-[#2a2a2a]"
                 }`}
               >
                 {chatLoading ? "Thinking..." : "Ask"}
@@ -320,7 +307,6 @@ export default function CountryDetailPanel({ country, onClose }: CountryDetailPa
             </form>
           </div>
         </div>
-      </div>
-    </div>
+    </DetailFrame>
   );
 }

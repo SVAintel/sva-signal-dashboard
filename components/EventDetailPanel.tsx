@@ -1,469 +1,222 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Event } from "@/lib/types";
-import { X } from "lucide-react";
+import { Dispatch, useMemo, useRef } from "react";
+import { ArrowRight, ArrowUpRight, BookOpen, ChevronRight, FileSearch, MessageSquare, Network } from "lucide-react";
+import { Event, isUnconfirmedSource } from "@/lib/types";
+import { categoryMeta } from "@/lib/categories";
+import { categoryGuidance } from "@/lib/report-guidance";
+import { articleUrl, CONTEXT_DISTANCE_KM, CONTEXT_WINDOW_HOURS, relatedReports, resolveReport, sourceReports, validCoordinates, validReportTime, type Relation, type RelatedReport } from "@/lib/report-context";
+import { reportViewLabels, type ReportNavigation, type ReportNavigationAction, type ReportView } from "@/lib/report-navigation";
+import DetailFrame from "./DetailFrame";
+import ReportAnalysis, { ReportConversation } from "./ReportAnalysis";
+import type { IncidentGroup } from "@/lib/incident-groups";
+import { reportCollections } from "@/lib/signal-pipeline";
 
 interface EventDetailPanelProps {
-  event: Event | null;
-  onClose: () => void;
+  navigation: ReportNavigation;
+  dispatch: Dispatch<ReportNavigationAction>;
+  loadedEvents: Event[];
+  scopedEvents: Event[];
+  scopeLabel: string;
+  feedError: string;
+  feedLoading: boolean;
+  groups: IncidentGroup[];
 }
+const dateLabel = (event: Event) => validReportTime(event)
+  ? new Date(event.timestamp).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+  : "Timestamp unavailable";
+const categoryLabel = (event: Event) => categoryMeta[event.category]?.label || event.category;
+const confidenceLabel = (event: Event) => event.confidence?.trim() || "Not supplied";
+const verificationLabel = (event: Event) => isUnconfirmedSource(event.source) ? "Unconfirmed source" : "Confirmed-source feed";
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export default function EventDetailPanel({ event, onClose }: EventDetailPanelProps) {
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!event) {
-      setChatMessages([]);
-      return;
-    }
-    setChatMessages([
-      {
-        role: "assistant",
-        content: "Ask me anything about this event. I can explain context, likely implications, and what to monitor next.",
-      },
-    ]);
-    setChatInput("");
-    setChatError(null);
-    setChatLoading(false);
-  }, [event?.id]);
-
-  const sendChatMessage = async () => {
-    if (!event) return;
-    const trimmed = chatInput.trim();
-    if (!trimmed || chatLoading) return;
-
-    const nextMessages: ChatMessage[] = [...chatMessages, { role: "user", content: trimmed }];
-    setChatMessages(nextMessages);
-    setChatInput("");
-    setChatError(null);
-    setChatLoading(true);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event,
-          messages: nextMessages,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "AI request failed");
-      }
-
-      setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply || "No response." }]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "AI request failed";
-      setChatError(message);
-    } finally {
-      setChatLoading(false);
-    }
+export default function EventDetailPanel({ navigation, dispatch, loadedEvents, scopedEvents, scopeLabel, feedError, feedLoading, groups }: EventDetailPanelProps) {
+  const body = useRef<HTMLDivElement>(null);
+  const conversations = useRef(new Map<string, ReportConversation>());
+  const location = navigation.entries[navigation.entries.length - 1];
+  const resolution = resolveReport(location.snapshot, loadedEvents);
+  const event = scopedEvents.find(report => report.id === location.snapshot.id) || resolution.event;
+  const retained = resolution.retained;
+  const incident = groups.find(group => group.reports.length > 1 && group.reports.some(report => report.id === event.id));
+  const collections = reportCollections(event);
+  const related = useMemo(() => relatedReports(event, scopedEvents, location.relation), [event, scopedEvents, location.relation]);
+  const allRelated = useMemo(() => relatedReports(event, scopedEvents), [event, scopedEvents]);
+  const source = useMemo(() => sourceReports(event, scopedEvents), [event, scopedEvents]);
+  const url = articleUrl(event.url);
+  const guidance = categoryGuidance(event.category);
+  const currentInScope = scopedEvents.some((report) => report.id === event.id);
+  const depth = navigation.entries.length;
+  const close = () => dispatch({ type: "close" });
+  const back = () => dispatch({ type: "back" });
+  const open = (view: ReportView, report = event) => {
+    const focused = document.activeElement;
+    dispatch({ type: "push", event: report, view, position: {
+      scrollTop: body.current?.scrollTop || 0,
+      focusId: focused instanceof HTMLElement ? focused.dataset.reportFocus || null : null,
+    } });
   };
+  const conversationKey = JSON.stringify(event);
 
-  if (!event) return null;
+  const contextScope = <div className="dossier-scope">
+    <strong>Current signal scope</strong>
+    <p>{scopeLabel}. Category, time, verification and text search are applied before matching.</p>
+    {feedLoading && <p role="status">The signal feed is loading.</p>}
+    {feedError && <p className="surface-error" role="status">The latest fetch failed. Context uses the last loaded reports.</p>}
+  </div>;
 
-  const analystNotes = generateAnalystNotes(event);
-  const categoryColor = getCategoryColor(event.category);
+  const reportLink = (report: Event, reasons?: RelatedReport) => <button
+    key={report.id} data-report-focus={`report-${report.id}`} className="dossier-report-link"
+    onClick={() => open("brief", report)} aria-label={`Open report: ${report.title}`}>
+    <span className="dossier-report-category">{categoryLabel(report)}<ArrowRight size={16} /></span>
+    <strong>{report.title}</strong>
+    {reasons && <span className="dossier-reasons">
+      {reasons.sameSource && <span>Same source</span>}
+      {reasons.sameCategory && <span>Same category</span>}
+      {reasons.distanceKm !== null && <span>Nearby reported coordinates · {Math.round(reasons.distanceKm)} km</span>}
+    </span>}
+    <span className="dossier-report-meta">{report.source} · {dateLabel(report)}</span>
+  </button>;
 
-  return (
-    <div className="absolute inset-y-0 right-0 z-[1200] flex w-full max-w-full sm:max-w-[420px] pointer-events-none">
-      <div className="pointer-events-auto flex h-full w-full flex-col overflow-y-auto border-l border-[#d4b36a]/30 bg-[#0e0e0ef5] shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#d4b36a]/30 bg-[#0f0f0f] px-5 py-4">
-          <div className="flex-1 pr-2">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-3 w-3 rounded-full" style={{ background: categoryColor, boxShadow: `0 0 8px ${categoryColor}` }} />
-              <span className="text-xs font-bold uppercase text-[#d4b36a]">{event.category.replace(/_/g, " ")}</span>
-              <span className="text-xs text-slate-600">•</span>
-              <span className="text-xs text-slate-500">{event.source}</span>
-            </div>
-            <h1 className="text-lg font-bold text-slate-100 leading-snug">{event.title}</h1>
-          </div>
-          <button onClick={onClose} className="shrink-0 rounded p-2 text-slate-400 hover:bg-[#262626] hover:text-[#d4b36a] transition">
-            <X size={20} />
-          </button>
+  return <DetailFrame title={location.view === "brief" ? event.title : location.view === "source" ? event.source || "Source not supplied" : reportViewLabels[location.view]}
+    eyebrow={location.view === "brief" ? `${categoryLabel(event)} / Selected report` : "Report dossier"}
+    onClose={close} closeLabel="Close exploration" onBack={back} depth={depth}
+    viewKey={location.key} bodyRef={body} scrollTop={location.scrollTop} focusId={location.focusId}
+    navigation={<nav className="dossier-breadcrumbs" aria-label="Report exploration">
+      <ol>
+        <li><button onClick={close}>Overview</button></li>
+        {navigation.entries.map((entry, index) => <li key={entry.key}>
+          <ChevronRight size={12} aria-hidden="true" />
+          {index === depth - 1 ? <span aria-current="page">{reportViewLabels[entry.view]}</span> :
+            <button title={entry.snapshot.title} aria-label={`Return to ${reportViewLabels[entry.view]}: ${entry.snapshot.title}`}
+              onClick={() => dispatch({ type: "jump", key: entry.key })}>{reportViewLabels[entry.view]}</button>}
+        </li>)}
+      </ol>
+    </nav>}
+    context={location.view !== "brief" ? <div className="dossier-parent-context">
+      <span>Reading within</span><p>{event.title}</p>
+    </div> : depth > 1 ? <div className="dossier-parent-context">
+      <span>Opened from {reportViewLabels[navigation.entries[depth - 2].view].toLowerCase()}</span>
+      <p>{navigation.entries[depth - 2].snapshot.title}</p>
+    </div> : undefined}>
+    <div className="detail-content">
+      {retained && <p className="dossier-notice" role="status">This report is no longer in the loaded feed. Its last opened snapshot is retained for this exploration.</p>}
+      {!retained && !currentInScope && <p className="dossier-notice" role="status">This selected report is outside the current filters. Context lists still follow your current filters.</p>}
+
+      {location.view === "brief" && <>
+        <div className="report-brief-source"><BookOpen size={15} /><strong>{event.source || "Source not supplied"}</strong><span>{verificationLabel(event)}</span></div>
+        <div className="report-brief-facts">
+          <div><span>Reported</span><p>{dateLabel(event)}</p></div>
+          <div><span>Supplied confidence</span><p>{confidenceLabel(event)}</p></div>
         </div>
-
-        <div className="p-5 space-y-6">
-          <div className="grid grid-cols-3 gap-3 pb-4 border-b border-[#3a3a3a]">
-            <div>
-              <p className="text-xs text-slate-600 uppercase font-semibold">Location</p>
-              <p className="text-sm text-slate-200 mt-1">{event.location.lat.toFixed(2)}°, {event.location.lng.toFixed(2)}°</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600 uppercase font-semibold">Timestamp</p>
-              <p className="text-sm text-slate-200 mt-1">{new Date(event.timestamp).toLocaleString()}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600 uppercase font-semibold">Confidence</p>
-              <p className={`text-sm font-bold mt-1 ${getConfidenceColor(event.confidence as string)}`}>{(event.confidence as string).toUpperCase()}</p>
-            </div>
-          </div>
-
-          <div>
-            <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3">Summary</h2>
-            <p className="text-sm leading-relaxed text-slate-300">{event.description}</p>
-          </div>
-
-          <div className="bg-[#111111] rounded border border-[#3a3a3a] p-4">
-            <h2 className="text-sm font-bold uppercase text-[#d4b36a] mb-3 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#d4b36a]" />
-              Analyst Assessment
-            </h2>
-            <div className="space-y-4 text-sm leading-relaxed text-slate-300">
-              {analystNotes.paragraphs.map((para, idx) => <p key={idx}>{para}</p>)}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-[#3a3a3a]">
-              <h3 className="text-xs font-bold uppercase text-slate-400 mb-2">Watch for developments:</h3>
-              <ul className="space-y-2">
-                {analystNotes.watchPoints.map((point, idx) => (
-                  <li key={idx} className="text-xs text-slate-400 flex gap-2">
-                    <span className="text-[#d4b36a]">▸</span>
-                    <span>{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="rounded border border-[#3a3a3a] bg-[#111111] p-4">
-            <h2 className="mb-3 text-sm font-bold uppercase text-[#d4b36a]">Event AI Q&A</h2>
-
-            <div className="max-h-72 space-y-3 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3">
-              {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-                  <span className="mb-1 block font-bold uppercase tracking-widest text-[10px]">
-                    {msg.role === "assistant" ? "AI" : "You"}
-                  </span>
-                  <div className="space-y-2 leading-relaxed">
-                    {msg.content
-                      .split(/\n\s*\n/)
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .map((para, pIdx) => (
-                        <p key={pIdx} className="whitespace-pre-wrap">
-                          {para}
-                        </p>
-                      ))}
-                  </div>
-                </div>
-              ))}
-              {chatLoading && (
-                <div className="text-xs text-slate-500">
-                  <span className="mr-2 font-bold uppercase tracking-widest text-[10px]">AI</span>
-                  Thinking...
-                </div>
-              )}
-            </div>
-
-            {chatError && <p className="mt-2 text-[11px] text-red-400">{chatError}</p>}
-
-            <form
-              className="mt-3 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                sendChatMessage();
-              }}
-            >
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask about this event..."
-                className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={chatLoading || !chatInput.trim()}
-                className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
-                  chatLoading || !chatInput.trim()
-                    ? "cursor-not-allowed border-slate-700 text-slate-600"
-                    : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
-                }`}
-              >
-                {chatLoading ? "Thinking..." : "Ask"}
-              </button>
-            </form>
-          </div>
-
-          <div>
-            <h2 className="text-sm font-bold uppercase text-slate-400 mb-3">Sources & References</h2>
-            <div className="space-y-2">
-              <a href={event.url || analystNotes.sourceUrl || "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
-                <span className="text-xs font-mono">{event.source}</span>
-                <span className="flex-1 truncate text-slate-400">{event.title}</span>
-                <span className="text-xs">→</span>
-              </a>
-              {analystNotes.additionalSources.map((src, idx) => (
-                <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded border border-[#3a3a3a] bg-[#111111] p-3 text-sm text-slate-400 hover:text-[#d4b36a] hover:bg-[#2a2a2a] hover:border-[#d4b36a]/50 transition">
-                  <span className="text-xs">{src.name}</span>
-                  <span className="flex-1 truncate text-slate-500">{src.title}</span>
-                  <span className="text-xs">→</span>
-                </a>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-[#3a3a3a]">
-            <p className="text-[10px] text-slate-600 italic">* Analyst assessment generated from available data sources. Confidence levels reflect data quality. Verify with primary sources before action.</p>
-          </div>
+        <section className="report-brief-summary"><h3>What the report says</h3>
+          <p>{event.description?.trim() || "No summary was supplied. Check the original reporting if a source link is available."}</p>
+        </section>
+        <div className="dossier-entry-points">
+          {incident && <button data-report-focus="incident" onClick={() => open("incident")}><Network size={20} />
+            <span><strong>Incident chronology</strong><small>{incident.reports.length} distinct reports · automatically grouped, not corroborated</small></span><ChevronRight size={17} /></button>}
+          <button data-report-focus="sources" onClick={() => open("sources")}><FileSearch size={20} />
+            <span><strong>Sources &amp; evidence</strong><small>{url ? "Original link, provenance & limitations" : "Provenance & missing source information"}</small></span><ChevronRight size={17} /></button>
+          <button data-report-focus="related" onClick={() => open("related")}><Network size={20} />
+            <span><strong>Related reporting</strong><small>{allRelated.total} scoped {allRelated.total === 1 ? "candidate" : "candidates"} · explore the context</small></span><ChevronRight size={17} /></button>
+          <button data-report-focus="analysis" onClick={() => open("analysis")}><MessageSquare size={20} />
+            <span><strong>Analysis &amp; questions</strong><small>AI conversation & category research prompts</small></span><ChevronRight size={17} /></button>
         </div>
-      </div>
+        <p className="detail-disclaimer">A report, not an established fact. Source labels and supplied confidence do not independently verify its claims.</p>
+      </>}
+
+      {location.view === "sources" && <>
+        <p className="dossier-intro">Follow the provenance before drawing conclusions. These are the source fields supplied with this report, not additional evidence gathered by SVA.</p>
+        <section className="dossier-evidence">
+          <span className="dossier-section-label">Original reporting</span>
+          <h3>{event.source || "Source not supplied"}</h3>
+          {url ? <a className="dossier-external-link" href={url} target="_blank" rel="noopener noreferrer">
+            <span>Open original report<small>{new URL(url).hostname}</small></span><ArrowUpRight size={20} />
+          </a> : <p className="dossier-notice">{event.url ? "The supplied article link is not a valid HTTP or HTTPS address." : "No original article URL was supplied."} This view cannot establish the original article or corroborate the report.</p>}
+          <dl className="dossier-evidence-facts">
+            <div><dt>Reported timestamp</dt><dd>{dateLabel(event)}</dd></div>
+            <div><dt>Supplied confidence</dt><dd>{confidenceLabel(event)}</dd></div>
+            <div><dt>Source classification</dt><dd>{verificationLabel(event)}</dd></div>
+            <div><dt>Reported coordinates</dt><dd>{validCoordinates(event.location) ? `${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°` : "Valid coordinates not supplied"}</dd></div>
+          </dl>
+        </section>
+        <section className="dossier-limitations"><h3>What this does not establish</h3>
+          <p>Source labels distinguish Telegram from other feeds, not verified facts from false claims. Confidence is the report&apos;s supplied label, not a probability of truth. Coordinates may be inferred or approximate.</p>
+          <p>No full article text has been retrieved for this dossier. Other items from this source are not independent corroboration.</p>
+        </section>
+        <section className="dossier-collections" aria-label="Collection provenance">
+          <h3>{collections.length} collected {collections.length === 1 ? "record" : "records"}</h3>
+          <p>These are this feed&apos;s original collection fields. Copies and captured revisions of the same article are retained together, not counted as independent confirmation. Expand each record to compare the supplied summaries.</p>
+          {collections.slice().reverse().map((record, index) => {
+            const link = articleUrl(record.url);
+            return <details key={record.id} className="dossier-collection">
+              <summary><span>{index + 1}. {record.source}</span><time>{dateLabel(record)}</time></summary>
+              <h4>{record.title}</h4>
+              <dl className="dossier-evidence-facts">
+                <div><dt>Collection provider</dt><dd>{record.provider}</dd></div>
+                <div><dt>Publisher / link host</dt><dd>{record.publisher || "Not supplied"}</dd></div>
+                <div><dt>Source classification</dt><dd>{verificationLabel(record)}</dd></div>
+                <div><dt>Supplied confidence</dt><dd>{confidenceLabel(record)}</dd></div>
+              </dl>
+              <p>{record.description || "No summary supplied with this collection."}</p>
+              {link ? <a href={link} target="_blank" rel="noopener noreferrer">Open this collection&apos;s original link <ArrowUpRight size={14} /></a> :
+                <p className="dossier-notice">No valid original article URL was supplied with this collection.</p>}
+            </details>;
+          })}
+        </section>
+        <button className="dossier-source-button" data-report-focus="source" onClick={() => open("source")}>
+          <span><strong>More from {event.source || "this source"}</strong><small>{source.total} other loaded {source.total === 1 ? "report" : "reports"} in the current scope</small></span><ChevronRight size={18} />
+        </button>
+        {guidance.additionalSources.length > 0 && <section className="detail-section">
+          <h3 className="detail-section-title">Background resources</h3>
+          <p className="detail-disclaimer">Category references only. These are not citations for this report or evidence of corroboration.</p>
+          <div className="dossier-background-links">{guidance.additionalSources.map((reference) => <a key={reference.url} href={reference.url} target="_blank" rel="noopener noreferrer">
+            <span>{reference.name}<small>{reference.title}</small></span><ArrowUpRight size={16} />
+          </a>)}</div>
+        </section>}
+      </>}
+
+      {location.view === "related" && <>
+        <p className="dossier-intro">Other reports worth reading alongside this one. Similar metadata is a navigation aid, not proof of the same incident, a causal link or independent corroboration.</p>
+        {contextScope}
+        <label className="dossier-relation-filter">Show candidates by
+          <select data-report-focus="relation" aria-label="Related reporting match" value={location.relation}
+            onChange={(e) => dispatch({ type: "relation", relation: e.target.value as Relation })}>
+            <option value="all">All matching reasons</option><option value="source">Same source</option>
+            <option value="category">Same specific category</option><option value="nearby">Nearby reported coordinates</option>
+          </select>
+        </label>
+        <p className="dossier-list-count">Showing {related.reports.length} of {related.total} candidates</p>
+        {related.reports.length ? <div className="dossier-report-list">{related.reports.map((item) => reportLink(item.event, item))}</div> :
+          <div className="dossier-empty"><Network size={24} /><h3>No matching reports in this scope</h3><p>{validReportTime(event) ? "Try another matching reason or change the map filters yourself. This does not mean there are no related events elsewhere." : "This report has no valid timestamp, so a time-bounded comparison cannot be made."}</p></div>}
+        <details className="dossier-method"><summary>How these candidates are selected</summary>
+          <p>Loaded reports within {CONTEXT_WINDOW_HOURS} hours of this report, sharing a source, a specific category (not General), or reported coordinates within {CONTEXT_DISTANCE_KM} km. Ranked by number of matching reasons, then proximity eligibility, time difference, recency and ID. At most 8 results are shown.</p>
+          <p>Reports with invalid timestamps or coordinates and duplicate IDs are excluded. Coordinates may be inferred; proximity is not proof of a shared incident or country.</p>
+        </details>
+      </>}
+
+      {location.view === "incident" && <>
+        <p className="dossier-intro">A likely incident, grouped automatically from explicit named evidence. Each entry remains a distinct report. Similar accounts can share an upstream source; they do not establish independent corroboration or a verified sequence of events.</p>
+        {contextScope}
+        {incident ? <>
+          <div className="dossier-scope"><strong>Why these reports are together</strong><p>{incident.reason}.</p></div>
+          <p className="dossier-list-count">{incident.reports.length} unique reports · {incident.reports.reduce((sum, report) => sum + reportCollections(report).length, 0)} collection records · oldest reported timestamp first</p>
+          <div className="dossier-report-list">{incident.reports.map(report => <div className="dossier-chronology-entry" key={report.id}>
+            {reportLink(report)}<p>{report.description || "No summary supplied."}</p>
+          </div>)}</div>
+          <p className="detail-disclaimer">Reported times are not necessarily incident times. Differing summaries are displayed as supplied, not adjudicated as contradictions. Use Individual reports in the ledger to remove this grouping.</p>
+        </> : <div className="dossier-empty"><Network size={24} /><h3>No multi-report group in the current scope</h3><p>The other members may no longer match your filters or the latest feed. This report and its exploration path are retained; filters have not been changed.</p></div>}
+      </>}
+
+      {location.view === "source" && <>
+        <p className="dossier-intro">Other loaded reports carrying the same source label. A source label may identify an aggregator, not an individual publisher or an independent witness.</p>
+        {contextScope}
+        <p className="dossier-list-count">Showing {source.reports.length} of {source.total} other reports · newest first</p>
+        {source.reports.length ? <div className="dossier-report-list">{source.reports.map((report) => reportLink(report))}</div> :
+          <div className="dossier-empty"><BookOpen size={24} /><h3>No other reports from this source</h3><p>None with valid timestamps and map coordinates are present in the current filtered feed. Filters have not been changed.</p></div>}
+        <p className="detail-disclaimer">Up to 12 unique reports with valid timestamps and coordinates, excluding the selected report. Unlike related candidates, this source list uses the full selected time range, not a separate 24-hour comparison window.</p>
+      </>}
+
+      {location.view === "analysis" && <ReportAnalysis key={`${location.key}-${conversationKey}`} event={event}
+        saved={conversations.current.get(conversationKey)} onSave={(conversation) => conversations.current.set(conversationKey, conversation)} />}
     </div>
-  );
+  </DetailFrame>;
 }
-
-function getCategoryColor(category: string): string {
-  const colors: Record<string, string> = {
-    war: "#ef4444",
-    counter_terrorism: "#a855f7",
-    natural_disaster: "#f59e0b",
-    market: "#22d3ee",
-    biological: "#22c55e",
-    political_unrest: "#f97316",
-    cyber: "#06b6d4",
-    nuclear: "#84cc16",
-    energy: "#d97706",
-    humanitarian: "#f43f5e",
-  };
-  return colors[category] || "#64748b";
-}
-
-function getConfidenceColor(confidence: string): string {
-  const colors: Record<string, string> = {
-    high: "text-green-400",
-    medium: "text-yellow-400",
-    low: "text-orange-400",
-    confirmed: "text-green-400",
-    pending: "text-amber-300",
-  };
-  return colors[confidence] || "text-slate-400";
-}
-
-interface AnalystNotesResult {
-  paragraphs: string[];
-  watchPoints: string[];
-  sourceUrl: string;
-  additionalSources: Array<{ name: string; title: string; url: string }>;
-}
-
-function generateAnalystNotes(event: Event): AnalystNotesResult {
-  const notesByCategory: Record<string, AnalystNotesResult> = {
-    war: {
-      paragraphs: [
-        `Military activity detected at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Analysis indicates potential force mobilization with pre-planned positioning. Intelligence suggests coordination with allied forces and logistics infrastructure staging. Historical patterns indicate 7-14 day window before active engagement escalation. Current readiness posture elevated.`,
-        `Recommend immediate escalation to command staff. Cross-reference with satellite imagery and comms intelligence. Monitor regional partner movements and supply chains. Expected phase: military declarations or UN sessions. Watch: casualty reports, refugee flows, cyber operations, and media campaigns. Level 2 strategic alert. Brief allied liaisons within 2 hours.`,
-      ],
-      watchPoints: [
-        "Formal military declarations or statements",
-        "Refugee/IDP movement and border crossings",
-        "Cyber warfare and critical infrastructure attacks",
-        "Supply chain disruptions",
-        "Media coordination and information warfare",
-        "Foreign military aid arrivals",
-      ],
-      sourceUrl: "https://www.reuters.com",
-      additionalSources: [
-        { name: "GDELT", title: "Geopolitical Event Database", url: "https://gdeltproject.org" },
-        { name: "ACLED", title: "Armed Conflict Location Data", url: "https://acleddata.com" },
-      ],
-    },
-    counter_terrorism: {
-      paragraphs: [
-        `Terrorist activity detected with organizational fingerprints consistent with known profiles. Tactical methods align with group playbook. Pattern analysis indicates coordination with supporter networks. Timing suggests opportunistic positioning. Planning window 3-6 weeks prior. Follow-up actions likely in 7-10 days.`,
-        `Immediate: Escalate to counterterrorism task force and international partners. Correlate financial, travel, and comms data. Brief agencies on threat indicators. Expected: arrest warrants, manhunts, infrastructure security upgrades. Monitor propaganda and radicalization. Key parameters: financial trails, travel patterns, weapons acquisition, claim-of-responsibility statements. Activate 5-Eyes information sharing.`,
-      ],
-      watchPoints: [
-        "Arrest warrants and law enforcement ops",
-        "Financial transaction patterns",
-        "Travel records and border alerts",
-        "Propaganda and radicalization content",
-        "Related attack planning indicators",
-        "International partner operations",
-      ],
-      sourceUrl: "https://www.newsapi.org",
-      additionalSources: [
-        { name: "ACLED", title: "Violence Data", url: "https://acleddata.com" },
-        { name: "NewsAPI", title: "Security Feed", url: "https://newsapi.org" },
-      ],
-    },
-    natural_disaster: {
-      paragraphs: [
-        `Natural disaster recorded at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Confirmed high-confidence detection. Potential cascading effects: aftershocks, infrastructure damage, humanitarian crisis. Elevated risk 72 hours post-event. Secondary hazards (landslides, tsunamis) probable. Early warning activated within 150km radius.`,
-        `Immediate: Activate humanitarian coordination and emergency services in affected regions. Coordinate with USAID, Red Crescent, bilateral partners. Monitor communications infrastructure. Prepare for refugee flows and assistance requests. Key indicators: aftershocks, dam integrity, disease risks, supply disruption. Level 3 humanitarian alert. Stage resources to forward bases within 4-6 hours.`,
-      ],
-      watchPoints: [
-        "Aftershock patterns and magnitude",
-        "Infrastructure damage and facility status",
-        "Disease and contamination risks",
-        "Refugee movements and displacement",
-        "Supply chain disruptions",
-        "Secondary hazards (landslides, tsunamis)",
-      ],
-      sourceUrl: "https://earthquake.usgs.gov",
-      additionalSources: [
-        { name: "EMSC", title: "European Seismic Centre", url: "https://www.emsc-csem.org" },
-        { name: "NOAA", title: "Tsunami & Storm Data", url: "https://www.noaa.gov" },
-      ],
-    },
-    market: {
-      paragraphs: [
-        `Financial volatility detected indicating policy shift or macroeconomic recalibration. Sector rotation suggests capital repositioning from risk to safe-haven. Pricing aligns with Fed signals. Implied volatility suggests elevated tail risks 30-60 days forward. Traditional hedge breakdown indicates market regime change. Crypto markets showing directional conviction.`,
-        `Brief finance leadership and treasury teams immediately. Monitor central bank communications and economic data. Prepare liquidity and rebalancing protocols. Key indicators: volatility persistence, credit spreads, currency realignment, commodity breakouts. Expected: policy communications, earnings revisions, capital flow redirects. Level 2 financial alert. Brief investment committees within 1 hour.`,
-      ],
-      watchPoints: [
-        "Central bank policy announcements",
-        "Economic data and consensus misses",
-        "Credit spread movements",
-        "Currency realignment patterns",
-        "Geopolitical risk premium changes",
-        "Earnings guidance revisions",
-      ],
-      sourceUrl: "https://www.alphavantage.co",
-      additionalSources: [
-        { name: "CoinGecko", title: "Crypto Market Data", url: "https://coingecko.com" },
-        { name: "Finnhub", title: "Financial Data", url: "https://finnhub.io" },
-      ],
-    },
-    biological: {
-      paragraphs: [
-        `Outbreak detection signals observed at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Epidemiological patterns suggest sustained community transmission with R-value above threshold. Pathogen characteristics and case clustering indicate potential for rapid geographic spread. WHO surveillance protocols activated; early intervention window is critical. Cross-reference with travel data and port-of-entry screening.`,
-        `Transmission risk assessment underway. Immediate priority: contact tracing network activation and healthcare capacity pre-positioning. Monitor mutation reports for virulence shifts. Coordinate with national health ministries and international health partners. Key parameters: case doubling time, healthcare utilization rates, geographic spread velocity, and genomic sequencing data. Activate biosurveillance sharing with allied health agencies.`,
-      ],
-      watchPoints: [
-        "Containment measures and border health controls",
-        "WHO emergency committee convening",
-        "Travel restriction announcements",
-        "Mutation and variant sequencing reports",
-        "Healthcare system capacity indicators",
-        "Vaccine and countermeasure stockpile status",
-      ],
-      sourceUrl: "https://www.who.int",
-      additionalSources: [
-        { name: "WHO", title: "World Health Organization", url: "https://who.int" },
-        { name: "CDC", title: "Centers for Disease Control", url: "https://cdc.gov" },
-      ],
-    },
-    political_unrest: {
-      paragraphs: [
-        `Destabilization indicators detected at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Opposition momentum building with coordinated network activation across multiple civic channels. Regime vulnerability assessment elevated based on economic grievance index, historical analogs, and social media amplification signals. Security forces on elevated alert; international observers monitoring situation.`,
-        `Pattern analysis indicates 14-21 day escalation window before consolidation or collapse. Foreign embassy posture changes are key leading indicators. Monitor for security force defections as tipping-point signal. Coordinate with diplomatic missions and regional partners. Key parameters: crowd size trajectory, government counter-messaging, economic trigger events, and external power positioning. Brief policy leadership within 4 hours.`,
-      ],
-      watchPoints: [
-        "Security force defections or loyalty shifts",
-        "International recognition and diplomatic signals",
-        "Foreign embassy security posture changes",
-        "Social media amplification and coordination",
-        "Economic triggers and currency movements",
-        "Armed group mobilization indicators",
-      ],
-      sourceUrl: "https://www.reuters.com",
-      additionalSources: [
-        { name: "Reuters", title: "Global News Feed", url: "https://reuters.com" },
-        { name: "Foreign Policy", title: "Geopolitical Analysis", url: "https://foreignpolicy.com" },
-      ],
-    },
-    cyber: {
-      paragraphs: [
-        `Cyberattack vector analysis indicates advanced persistent threat (APT) activity with attribution indicators matching known state-sponsored or criminal group TTPs. Attack signature correlates with prior campaigns; lateral movement patterns suggest pre-positioned access. Infrastructure vulnerability confirmed across multiple nodes. Incident response protocols activated; forensic collection underway.`,
-        `Secondary target assessment in progress — pivot indicators suggest broader campaign scope. Monitor for data exfiltration signals and C2 beacon activity. Coordinate with CISA, sector ISACs, and international cyber partners. Key parameters: affected system inventory, patch release timelines, attribution confidence level, and diplomatic escalation thresholds. Brief CISO and executive leadership immediately. Prepare public disclosure timeline.`,
-      ],
-      watchPoints: [
-        "Secondary target identification and lateral movement",
-        "Data exfiltration volume and destination indicators",
-        "Official attribution statements from governments",
-        "Patch and vulnerability disclosure releases",
-        "C2 infrastructure takedown operations",
-        "Sector-wide alert and ISAC notifications",
-      ],
-      sourceUrl: "https://www.cisa.gov",
-      additionalSources: [
-        { name: "CISA", title: "Cybersecurity & Infrastructure Security", url: "https://cisa.gov" },
-        { name: "Threat Intel", title: "APT Tracking Feeds", url: "https://attack.mitre.org" },
-      ],
-    },
-    nuclear: {
-      paragraphs: [
-        `Proliferation risk indicators elevated at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). Enrichment activity detected above civilian threshold based on open-source technical indicators. IAEA monitoring protocols activated; satellite imagery analysis indicates facility configuration changes consistent with weapons-development timeline. Delivery system capability assessment underway.`,
-        `Diplomatic channel activity is the primary de-escalation pathway. Monitor dual-use technology transfer patterns and procurement networks. Coordinate with IAEA verification teams and P5+1 diplomatic frameworks. Key parameters: enrichment level percentage, centrifuge cascade count, warhead miniaturization indicators, and delivery vehicle range assessment. Brief national security council within 2 hours. Prepare sanctions escalation options.`,
-      ],
-      watchPoints: [
-        "IAEA inspector access and compliance status",
-        "Satellite imagery changes at known facilities",
-        "Diplomatic channel communications",
-        "Dual-use technology transfer detections",
-        "Delivery system test and development indicators",
-        "Financial sanctions evasion patterns",
-      ],
-      sourceUrl: "https://www.iaea.org",
-      additionalSources: [
-        { name: "IAEA", title: "International Atomic Energy Agency", url: "https://iaea.org" },
-        { name: "NTI", title: "Nuclear Threat Initiative", url: "https://nti.org" },
-      ],
-    },
-    energy: {
-      paragraphs: [
-        `Supply chain disruption detected with cascading market effects confirmed. Geopolitical leverage play identified — state actor using energy infrastructure as coercive instrument. Pipeline integrity and flow rate anomalies detected across key transit corridors. Strategic reserve drawdown initiated by affected governments; commodity derivative markets pricing in sustained disruption.`,
-        `Alternative supply route viability assessment underway. Monitor diplomatic negotiations for resolution timeline indicators. Coordinate with IEA emergency response mechanisms and allied energy ministries. Key parameters: strategic reserve days-of-supply, LNG spot market availability, alternative pipeline capacity, and political resolution probability. Brief energy security leadership and treasury within 1 hour. Prepare emergency supply sharing protocol activation.`,
-      ],
-      watchPoints: [
-        "Strategic reserve levels and drawdown rate",
-        "Alternative supply route activation",
-        "Diplomatic negotiation progress signals",
-        "Market derivative and futures positioning",
-        "Critical infrastructure physical security status",
-        "Downstream industrial and civilian impact indicators",
-      ],
-      sourceUrl: "https://www.iea.org",
-      additionalSources: [
-        { name: "IEA", title: "International Energy Agency", url: "https://iea.org" },
-        { name: "EIA", title: "Energy Information Administration", url: "https://eia.gov" },
-      ],
-    },
-    humanitarian: {
-      paragraphs: [
-        `Displacement patterns confirmed at (${event.location.lat.toFixed(2)}°, ${event.location.lng.toFixed(2)}°). IDP movement tracking indicates accelerating civilian exodus from conflict or disaster zone. Aid access constraints imposed by armed actors or infrastructure collapse. Civilian protection status degraded; international humanitarian law compliance indicators negative. IDP camp capacity approaching critical threshold.`,
-        `Aid corridor access compromise requires immediate diplomatic escalation. Coordinate with UNHCR, WFP, OCHA, and bilateral humanitarian partners. Food security index deteriorating; pre-famine indicators present in affected population segments. Key parameters: IDP camp capacity utilization, food security phase classification, medical supply chain status, and international tribunal referral status. Brief humanitarian affairs leadership and donor governments within 6 hours.`,
-      ],
-      watchPoints: [
-        "IDP camp capacity and population flow rates",
-        "Food security phase classification changes",
-        "Aid corridor access and armed actor compliance",
-        "International tribunal and accountability actions",
-        "Donor government response and funding pledges",
-        "Disease outbreak risk in displaced populations",
-      ],
-      sourceUrl: "https://www.unhcr.org",
-      additionalSources: [
-        { name: "UNHCR", title: "UN Refugee Agency", url: "https://unhcr.org" },
-        { name: "OCHA", title: "UN Office for Coordination of Humanitarian Affairs", url: "https://unocha.org" },
-      ],
-    },
-  };
-
-  return notesByCategory[event.category] || {
-    paragraphs: [
-      "Event detected and logged. Pattern analysis underway for baseline threat assessment.",
-      "Monitor for secondary indicators and correlation with known events. Activate intelligence protocols.",
-    ],
-    watchPoints: [
-      "Secondary confirmations",
-      "Pattern correlations",
-      "Third-party verification",
-      "Impact indicators",
-    ],
-    sourceUrl: event.source || "#",
-    additionalSources: [],
-  };
-}
-

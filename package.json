@@ -6,9 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:report-exploration": "node --test scripts/test-report-exploration.cjs",
+    "test:signal-quality": "node --test scripts/test-signal-quality.cjs"
   },
   "dependencies": {
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
+    "@react-leaflet/core": "^2.1.0",
     "@types/three": "^0.185.4",
     "@vercel/analytics": "^2.0.1",
     "axios": "^1.6.8",
@@ -17,6 +21,7 @@
     "hls.js": "^1.6.16",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.27.0",
+    "maplibre-gl": "5.24.0",
     "next": "^14.2.3",
     "next-auth": "^4.24.15",
     "pg": "^8.23.0",

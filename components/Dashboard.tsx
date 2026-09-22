@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { Activity, ArrowLeft, BookOpen, ChartNoAxesCombined, ChevronDown, Globe2, Layers, ListFilter, Map, MessageSquare, Network, RefreshCw, Tv, X } from "lucide-react";
+import axios from "axios";
+import { useSession } from "next-auth/react";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
 import LiveBroadcasts, { HlsVideo, ActiveLiveChannel } from "./LiveBroadcasts";
 import AmbientAudio from "./AmbientAudio";
+import AuthWidget from "./AuthWidget";
+import AIAnalystPanel from "./AIAnalystPanel";
+import WorkspacePopover from "./WorkspacePopover";
 import EventDetailPanel from "./EventDetailPanel";
 import ConflictZoneDetailPanel, { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import MilitaryBaseDetailPanel, { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
@@ -15,52 +21,46 @@ import CountryDetailPanel, { CountryData } from "./CountryDetailPanel";
 import PortDetailPanel, { PortData } from "./PortDetailPanel";
 import PatternAlertsPanel, { CorrelationCluster } from "./PatternAlertsPanel";
 import { COUNTRY_DETAILS } from "@/lib/data/country-details";
-import AIAnalystPanel from "./AIAnalystPanel";
 import { useStore, ALL_CATEGORIES } from "@/store/useStore";
-import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
-import axios from "axios";
-import { useSession } from "next-auth/react";
-import AuthWidget from "./AuthWidget";
+import { Event, VerificationFilter } from "@/lib/types";
+import { categoryMeta } from "@/lib/categories";
+import { initialReportNavigation, reportNavigationReducer } from "@/lib/report-navigation";
+import { resolveReport } from "@/lib/report-context";
+import { groupIncidents } from "@/lib/incident-groups";
+import { scopeReports, parseSignalQuality, type SignalQuality } from "@/lib/signal-pipeline";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 const GlobeMap = dynamic(() => import("./GlobeMap"), { ssr: false });
 
-const categoryLabels: Record<string, { label: string; color: string; tooltip: string }> = {
-  war: { label: "WAR", color: "#ef4444", tooltip: "WAR — Armed Conflict & Military Operations" },
-  counter_terrorism: { label: "CT", color: "#a855f7", tooltip: "CT — Counter-Terrorism" },
-  natural_disaster: { label: "GEO", color: "#f59e0b", tooltip: "GEO — Geophysical & Natural Disasters" },
-  market: { label: "MKT", color: "#22d3ee", tooltip: "MKT — Financial Markets & Economic Events" },
-  biological: { label: "BIO", color: "#22c55e", tooltip: "BIO — Biological Threats & Outbreaks" },
-  political_unrest: { label: "POL", color: "#f97316", tooltip: "POL — Political Unrest & Civil Instability" },
-  cyber: { label: "CYB", color: "#06b6d4", tooltip: "CYB — Cyber Attacks & Digital Threats" },
-  nuclear: { label: "NUC", color: "#84cc16", tooltip: "NUC — Nuclear & Radiological Activity" },
-  energy: { label: "NRG", color: "#d97706", tooltip: "NRG — Energy Infrastructure & Supply" },
-  humanitarian: { label: "HUM", color: "#f43f5e", tooltip: "HUM — Humanitarian Crises & Displacement" },
-  general: { label: "GEN", color: "#94a3b8", tooltip: "GEN — General / Uncategorized" },
-};
-
-type SidebarTab = "events" | "news" | "stocks" | "analyst" | "patterns";
-
-// Time-range filter options for the map's recency selector.
-const TIME_RANGES: { label: string; hours: number | null }[] = [
-  { label: "12H", hours: 12 },
-  { label: "24H", hours: 24 },
-  { label: "48H", hours: 48 },
-  { label: "ALL", hours: null },
+const panels = [
+  { id: "events", label: "Signals", title: "Signal ledger", subtitle: "Reporting in geographic context", icon: Activity },
+  { id: "news", label: "Insights", title: "Policy & perspective", subtitle: "Research beyond the headlines", icon: BookOpen },
+  { id: "stocks", label: "Markets", title: "Market watch", subtitle: "The economic context", icon: ChartNoAxesCombined },
+  { id: "analyst", label: "Analyst", title: "Analyst desk", subtitle: "Interrogate the current picture", icon: MessageSquare },
+  { id: "patterns", label: "Patterns", title: "Spatial patterns", subtitle: "Connections across reports", icon: Network },
+] as const;
+type SidebarTab = typeof panels[number]["id"];
+const TIME_RANGES = [
+  { label: "Past 12 hours", hours: 12 },
+  { label: "Past 24 hours", hours: 24 },
+  { label: "Past 48 hours", hours: 48 },
+  { label: "Any time", hours: null },
 ];
-type MapLayerKey =
-  | "tradeRoutes"
-  | "conflictZones"
-  | "ports"
-  | "navalVessels"
-  | "cables"
-  | "pipelines"
-  | "militaryBases"
-  | "wildfires"
-  | "storms"
-  | "gpsJamming"
-  | "fleetTracker"
-  | "countries";
+const mapLayerDefs = [
+  ["countries", "Country borders"],
+  ["conflictZones", "Conflict zones"],
+  ["tradeRoutes", "Trade routes"],
+  ["ports", "Ports"],
+  ["cables", "Submarine cables"],
+  ["pipelines", "Oil & gas pipelines"],
+  ["militaryBases", "Military bases"],
+  ["navalVessels", "Naval & tanker vessels"],
+  ["fleetTracker", "US fleet tracker"],
+  ["wildfires", "Wildfires"],
+  ["storms", "Tropical storms"],
+  ["gpsJamming", "GPS interference"],
+] as const;
+type MapLayerKey = typeof mapLayerDefs[number][0];
 type MapLayerData = {
   tradeRoutes: Array<{ name: string; points: [number, number][] }>;
   conflictZones: ConflictZoneData[];
@@ -70,63 +70,33 @@ type MapLayerData = {
   militaryBases: MilitaryBaseData[];
 };
 type NavalVessel = {
-  mmsi: string;
-  name: string;
-  lat: number;
-  lng: number;
-  course: number | null;
-  speed: number | null;
-  shipType: number | null;
-  kind: "military" | "tanker" | "sanctioned";
+  mmsi: string; name: string; lat: number; lng: number; course: number | null;
+  speed: number | null; shipType: number | null; kind: "military" | "tanker" | "sanctioned";
 };
 type Wildfire = {
-  lat: number;
-  lng: number;
-  brightness: number;
-  frp: number;
-  confidence: string;
-  acqDate: string;
-  acqTime: string;
-  daynight: string;
+  lat: number; lng: number; brightness: number; frp: number; confidence: string;
+  acqDate: string; acqTime: string; daynight: string;
 };
 type Storm = {
-  id: string;
-  name: string;
-  classification: string;
-  lat: number;
-  lng: number;
-  intensity: number | null;
-  pressure: number | null;
-  movementDir: number | null;
-  movementSpeed: number | null;
-  advisoryUrl: string | null;
-  lastUpdate: string | null;
+  id: string; name: string; classification: string; lat: number; lng: number;
+  intensity: number | null; pressure: number | null; movementDir: number | null;
+  movementSpeed: number | null; advisoryUrl: string | null; lastUpdate: string | null;
 };
 type GpsJamHex = {
-  h3: string;
-  lat: number;
-  lng: number;
-  level: "medium" | "high";
-  pct: number;
-  affectedAircraft: number;
-  totalAircraft: number;
+  h3: string; lat: number; lng: number; level: "medium" | "high"; pct: number;
+  affectedAircraft: number; totalAircraft: number;
 };
 
 export default function Dashboard() {
-  const {
-    activeCategories,
-    toggleCategory,
-    setAllCategories,
-    setDashboardActive,
-    activeTimeRangeHours,
-    setActiveTimeRangeHours,
-  } = useStore();
+  const { activeCategories, toggleCategory, setAllCategories, setDashboardActive, activeTimeRangeHours, setActiveTimeRangeHours } = useStore();
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showInitOverlay, setShowInitOverlay] = useState(true);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState("");
+  const [lastFetchError, setLastFetchError] = useState("");
+  const [reportNavigation, dispatchReport] = useReducer(reportNavigationReducer, initialReportNavigation);
+  const reportLocation = reportNavigation.entries[reportNavigation.entries.length - 1];
+  useEffect(() => { dispatchReport({ type: "refresh", events: allEvents }); }, [allEvents]);
   const [selectedConflictZone, setSelectedConflictZone] = useState<ConflictZoneData | null>(null);
   const [selectedMilitaryBase, setSelectedMilitaryBase] = useState<MilitaryBaseData | null>(null);
   const [selectedFleetGroup, setSelectedFleetGroup] = useState<FleetGroup | null>(null);
@@ -134,22 +104,20 @@ export default function Dashboard() {
   const [selectedPort, setSelectedPort] = useState<PortData | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<CorrelationCluster | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
+  const [signalQuery, setSignalQuery] = useState("");
+  const [groupedReports, setGroupedReports] = useState(true);
+  const [signalQuality, setSignalQuality] = useState<SignalQuality | null>(null);
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
   const [portFilter, setPortFilter] = useState<"all" | "major" | "minor">("major");
-  const [fleetRegionFilter, setFleetRegionFilter] = useState<string>("all");
-  const [lastUpdated, setLastUpdated] = useState<string>("");
-  const [lastFetchError, setLastFetchError] = useState<string>("");
+  const [fleetRegionFilter, setFleetRegionFilter] = useState("all");
   const [activeTab, setActiveTab] = useState<SidebarTab>("events");
   const [mobileView, setMobileView] = useState<"panel" | "map" | "live">("map");
   const [layersMenuOpen, setLayersMenuOpen] = useState(false);
-  // Consolidated bottom-sheet for map controls (time range, view mode, layers,
-  // legend) on phone-width screens only — desktop keeps the separate floating
-  // corner overlays untouched.
-  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [layerData, setLayerData] = useState<MapLayerData | null>(null);
   const [navalVessels, setNavalVessels] = useState<NavalVessel[]>([]);
   const [navalLoading, setNavalLoading] = useState(false);
-  const [navalLastChecked, setNavalLastChecked] = useState<string>("");
+  const [navalLastChecked, setNavalLastChecked] = useState("");
   const [navalOutage, setNavalOutage] = useState(false);
   const [wildfires, setWildfires] = useState<Wildfire[]>([]);
   const [wildfiresLoading, setWildfiresLoading] = useState(false);
@@ -159,59 +127,28 @@ export default function Dashboard() {
   const [gpsJamLoading, setGpsJamLoading] = useState(false);
   const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
   const [fleetLoading, setFleetLoading] = useState(false);
-  const [fleetLastChecked, setFleetLastChecked] = useState<string>("");
-  const [staleCountryFlags, setStaleCountryFlags] = useState<
-    { country: string; issue: string; evidence: string | null; detectedAt: string }[]
-  >([]);
-  const [staleCountryPanelOpen, setStaleCountryPanelOpen] = useState(false);
+  const [fleetLastChecked, setFleetLastChecked] = useState("");
   const [fleetSourceUrl, setFleetSourceUrl] = useState<string | null>(null);
   const [fleetPublishedAt, setFleetPublishedAt] = useState<string | null>(null);
-  const [activeLayers, setActiveLayers] = useState({
-    tradeRoutes: false,
-    conflictZones: false,
-    ports: false,
-    navalVessels: false,
-    cables: false,
-    pipelines: false,
-    militaryBases: false,
-    wildfires: false,
-    storms: false,
-    gpsJamming: false,
-    fleetTracker: false,
-    countries: true,
+  const [staleCountryFlags, setStaleCountryFlags] = useState<{ country: string; issue: string; evidence: string | null; detectedAt: string }[]>([]);
+  const [staleCountryPanelOpen, setStaleCountryPanelOpen] = useState(false);
+  const [activeLayers, setActiveLayers] = useState<Record<MapLayerKey, boolean>>({
+    tradeRoutes: false, conflictZones: false, ports: false, navalVessels: false,
+    cables: false, pipelines: false, militaryBases: false, wildfires: false,
+    storms: false, gpsJamming: false, fleetTracker: false, countries: true,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
-
-  // Resizable panel state — sidebar width (drag divider between sidebar/map).
-  // The live-feed panel no longer has its own drag handle: since the video
-  // area is always a fixed 16:9 box (to avoid letterboxing), a separate
-  // draggable height for it doesn't do anything useful anymore.
-  // 480 (not 420) so the Live Broadcasts channel-button row (3 quick-pick
-  // buttons + "More" dropdown) fits on one line by default without wrapping.
-  const [sidebarWidth, setSidebarWidth] = useState(480);
-  const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(false);
-  // Mobile-only Picture-in-Picture mini player for the live news feed — see
-  // the "Live PiP mini player" block further down for the render. Mirrors
-  // whichever curated channel is currently playing in the full sidebar
-  // player; entirely additive, no effect on desktop.
+  const [scanEnabled, setScanEnabled] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [compactView, setCompactView] = useState(false);
+  const [mapPrefsReady, setMapPrefsReady] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(360);
+  const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(true);
   const [pipChannel, setPipChannel] = useState<ActiveLiveChannel | null>(null);
   const [pipDismissed, setPipDismissed] = useState(false);
-  // Ambient audio state lifted up from AmbientAudio so both the header
-  // control and the mobile-only Map Controls sheet control drive the same
-  // single <audio> element (no duplicate playback).
   const [ambientPlaying, setAmbientPlaying] = useState(false);
   const [ambientVolume, setAmbientVolume] = useState(0.4);
   const dragStateRef = useRef<{ startPos: number; startSize: number } | null>(null);
-
-  // --- Signed-in preference persistence -----------------------------------
-  // Optional: the dashboard is fully usable signed-out (all state below still
-  // works, just resets on reload). When signed in, we hydrate a handful of
-  // "layout/filter" preferences from the server once per sign-in, then
-  // debounce-save them back whenever they change. Deliberately NOT persisting
-  // ambientPlaying (autoplay-policy-gated; shouldn't force audio on reload)
-  // or anything view-selection-y that should reset per visit (selected
-  // event/panel, active tab, etc.) — just the "how I like my dashboard set up"
-  // preferences.
   const { status: sessionStatus } = useSession();
   const prefsHydratedRef = useRef(false);
   const skipNextPrefsSaveRef = useRef(false);
@@ -225,15 +162,13 @@ export default function Dashboard() {
         if (!res.ok) return;
         const { prefs } = await res.json();
         if (!prefs || typeof prefs !== "object") return;
-        // Applying hydrated values triggers the save-effect below; skip that
-        // one save so we don't immediately re-write back what we just read.
         skipNextPrefsSaveRef.current = true;
         if (Array.isArray(prefs.activeCategories)) setAllCategories(prefs.activeCategories);
         if (prefs.activeTimeRangeHours !== undefined) setActiveTimeRangeHours(prefs.activeTimeRangeHours);
         if (typeof prefs.sidebarWidth === "number") setSidebarWidth(prefs.sidebarWidth);
         if (typeof prefs.ambientVolume === "number") setAmbientVolume(prefs.ambientVolume);
-      } catch {
-        // Best-effort — dashboard works fine without persisted prefs.
+      } catch (error) {
+        console.error("Workspace preferences could not be loaded:", error);
       }
     })();
   }, [sessionStatus, setAllCategories, setActiveTimeRangeHours]);
@@ -246,25 +181,17 @@ export default function Dashboard() {
     }
     const id = setTimeout(() => {
       fetch("/api/prefs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ activeCategories, activeTimeRangeHours, sidebarWidth, ambientVolume }),
-      }).catch(() => {
-        // Best-effort — a failed save just means prefs won't stick this time.
-      });
+      }).catch((error) => console.error("Workspace preferences could not be saved:", error));
     }, 800);
     return () => clearTimeout(id);
   }, [sessionStatus, activeCategories, activeTimeRangeHours, sidebarWidth, ambientVolume]);
 
-
-  const handleDragMove = useCallback((e: MouseEvent) => {
+  const handleDragMove = useCallback((event: MouseEvent) => {
     const drag = dragStateRef.current;
-    if (!drag) return;
-    const delta = e.clientX - drag.startPos;
-    const next = Math.min(720, Math.max(300, drag.startSize + delta));
-    setSidebarWidth(next);
+    if (drag) setSidebarWidth(Math.min(720, Math.max(320, drag.startSize + event.clientX - drag.startPos)));
   }, []);
-
   const handleDragEnd = useCallback(() => {
     dragStateRef.current = null;
     document.body.style.cursor = "";
@@ -272,79 +199,47 @@ export default function Dashboard() {
     window.removeEventListener("mousemove", handleDragMove);
     window.removeEventListener("mouseup", handleDragEnd);
   }, [handleDragMove]);
-
-  const startDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStateRef.current = { startPos: e.clientX, startSize: sidebarWidth };
+  const startDrag = (event: React.MouseEvent) => {
+    event.preventDefault();
+    dragStateRef.current = { startPos: event.clientX, startSize: sidebarWidth };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("mousemove", handleDragMove);
     window.addEventListener("mouseup", handleDragEnd);
   };
-
-  useEffect(() => {
-    return () => {
-      window.removeEventListener("mousemove", handleDragMove);
-      window.removeEventListener("mouseup", handleDragEnd);
-    };
-  }, [handleDragMove, handleDragEnd]);
+  useEffect(() => () => handleDragEnd(), [handleDragEnd]);
 
   const fetchEvents = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
       const res = await axios.get("/api/events");
+      const quality = parseSignalQuality(res.headers["x-sva-signal-quality"]);
       setAllEvents(res.data);
-      setLastUpdated(
-        new Date().toLocaleString(undefined, {
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          timeZoneName: "short",
-        })
-      );
+      setSignalQuality(quality);
+      setLastUpdated(new Date().toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }));
       setLastFetchError("");
     } catch (error) {
       console.error("Failed to fetch events:", error);
-      setLastFetchError(
-        error instanceof Error ? error.message : "Failed to fetch events"
-      );
+      setLastFetchError(error instanceof Error ? error.message : "Failed to fetch events");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
-
   useEffect(() => {
     fetchEvents();
-    const interval = setInterval(() => fetchEvents(), 1800000); // 30 minutes
+    const interval = setInterval(() => fetchEvents(), 1800000);
     return () => clearInterval(interval);
   }, []);
-
   useEffect(() => {
     const fetchLayers = async () => {
-      try {
-        const res = await axios.get("/api/map-layers");
-        setLayerData(res.data);
-      } catch (error) {
-        console.error("Failed to fetch map layers:", error);
-      }
+      try { setLayerData((await axios.get("/api/map-layers")).data); }
+      catch (error) { console.error("Failed to fetch map layers:", error); }
     };
     fetchLayers();
-    const interval = setInterval(fetchLayers, 3600000); // 60 minutes
+    const interval = setInterval(fetchLayers, 3600000);
     return () => clearInterval(interval);
   }, []);
-
-  // Naval vessel layer is a live, best-effort AIS feed (military-flagged and
-  // tanker-flagged ships only, sparse coverage) — only poll it while the
-  // layer is actually toggled on, since each request opens a short-lived
-  // upstream WebSocket connection. Server now self-refreshes the AIS scan
-  // once a day in the background and persists results to Postgres (see
-  // app/api/naval/route.ts) — GET here is an instant read of that cache,
-  // never a live 90s scan, so users never wait on page load. Poll frequently
-  // so the "SCANNING…" status and vessel count update promptly once a
-  // background refresh completes, without any cost since reads are cheap.
   useEffect(() => {
     if (!activeLayers.navalVessels) return;
     const fetchNaval = async () => {
@@ -353,21 +248,13 @@ export default function Dashboard() {
         setNavalVessels(res.data?.vessels || []);
         setNavalLoading(!!res.data?.refreshing);
         setNavalOutage(!!res.data?.outage);
-        setNavalLastChecked(
-          res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : ""
-        );
-      } catch (error) {
-        console.error("Failed to fetch naval vessels:", error);
-      }
+        setNavalLastChecked(res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : "");
+      } catch (error) { console.error("Failed to fetch naval vessels:", error); }
     };
     fetchNaval();
-    const interval = setInterval(fetchNaval, 20000); // 20s — cheap read, just polls cache status
+    const interval = setInterval(fetchNaval, 20000);
     return () => clearInterval(interval);
   }, [activeLayers.navalVessels]);
-
-  // Wildfires: NASA FIRMS 24h global active-fire feed, server-cached for 1h.
-  // Only poll while the layer is on; 30 min matches the data's real update
-  // cadence closely enough without adding load.
   useEffect(() => {
     if (!activeLayers.wildfires) return;
     const fetchWildfires = async () => {
@@ -375,19 +262,13 @@ export default function Dashboard() {
         setWildfiresLoading(true);
         const res = await axios.get("/api/wildfires");
         setWildfires(res.data?.fires || []);
-      } catch (error) {
-        console.error("Failed to fetch wildfires:", error);
-      } finally {
-        setWildfiresLoading(false);
-      }
+      } catch (error) { console.error("Failed to fetch wildfires:", error); }
+      finally { setWildfiresLoading(false); }
     };
     fetchWildfires();
-    const interval = setInterval(fetchWildfires, 30 * 60 * 1000); // 30 min
+    const interval = setInterval(fetchWildfires, 1800000);
     return () => clearInterval(interval);
   }, [activeLayers.wildfires]);
-
-  // Storms: NOAA NHC active tropical cyclones (Atlantic + E/C Pacific only —
-  // not global). Server-cached 15 min; poll at the same cadence.
   useEffect(() => {
     if (!activeLayers.storms) return;
     const fetchStorms = async () => {
@@ -395,20 +276,13 @@ export default function Dashboard() {
         setStormsLoading(true);
         const res = await axios.get("/api/storms");
         setStorms(res.data?.storms || []);
-      } catch (error) {
-        console.error("Failed to fetch storms:", error);
-      } finally {
-        setStormsLoading(false);
-      }
+      } catch (error) { console.error("Failed to fetch storms:", error); }
+      finally { setStormsLoading(false); }
     };
     fetchStorms();
-    const interval = setInterval(fetchStorms, 15 * 60 * 1000); // 15 min
+    const interval = setInterval(fetchStorms, 900000);
     return () => clearInterval(interval);
   }, [activeLayers.storms]);
-
-  // GPS/GNSS Jamming: gpsjam.org daily H3-hex interference feed (ADS-B
-  // Exchange derived), server-parsed and cached for 6h. The upstream data
-  // itself only refreshes once/day, so a long poll interval is plenty.
   useEffect(() => {
     if (!activeLayers.gpsJamming) return;
     const fetchGpsJamming = async () => {
@@ -416,22 +290,13 @@ export default function Dashboard() {
         setGpsJamLoading(true);
         const res = await axios.get("/api/gps-jamming");
         setGpsJamHexes(res.data?.hexes || []);
-      } catch (error) {
-        console.error("Failed to fetch GPS jamming data:", error);
-      } finally {
-        setGpsJamLoading(false);
-      }
+      } catch (error) { console.error("Failed to fetch GPS jamming data:", error); }
+      finally { setGpsJamLoading(false); }
     };
     fetchGpsJamming();
-    const interval = setInterval(fetchGpsJamming, 60 * 60 * 1000); // 1h
+    const interval = setInterval(fetchGpsJamming, 3600000);
     return () => clearInterval(interval);
   }, [activeLayers.gpsJamming]);
-
-  // US Fleet Tracker: USNI News' weekly Fleet and Marine Tracker report,
-  // scraped server-side (see app/api/fleet-tracker/route.ts) and cached for
-  // 12h — USNI only publishes a new edition roughly weekly, so there's no
-  // need to poll more often than that; the interval here just picks up a
-  // fresh edition within a few hours of it going live.
   useEffect(() => {
     if (!activeLayers.fleetTracker) return;
     const fetchFleetTracker = async () => {
@@ -441,1054 +306,320 @@ export default function Dashboard() {
         setFleetGroups(res.data?.groups || []);
         setFleetSourceUrl(res.data?.sourceUrl || null);
         setFleetPublishedAt(res.data?.publishedAt || null);
-        setFleetLastChecked(
-          res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : ""
-        );
-      } catch (error) {
-        console.error("Failed to fetch fleet tracker:", error);
-      } finally {
-        setFleetLoading(false);
-      }
+        setFleetLastChecked(res.data?.lastUpdated ? new Date(res.data.lastUpdated).toLocaleTimeString() : "");
+      } catch (error) { console.error("Failed to fetch fleet tracker:", error); }
+      finally { setFleetLoading(false); }
     };
     fetchFleetTracker();
-    const interval = setInterval(fetchFleetTracker, 60 * 60 * 1000); // 1h
+    const interval = setInterval(fetchFleetTracker, 3600000);
     return () => clearInterval(interval);
   }, [activeLayers.fleetTracker]);
-
   useEffect(() => {
     const stored = window.localStorage.getItem("dashboard-map-view-mode");
-    if (stored === "2d" || stored === "3d") {
-      setMapViewMode(stored);
-    }
+    if (stored === "2d" || stored === "3d") setMapViewMode(stored);
+    const scan = window.localStorage.getItem("dashboard-scan-sweep");
+    if (scan !== null) setScanEnabled(scan === "true");
+    setMapPrefsReady(true);
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const compact = window.matchMedia("(max-width: 767px)");
+    const updateMotion = () => setReducedMotion(motion.matches);
+    const updateCompact = () => setCompactView(compact.matches);
+    updateMotion();
+    updateCompact();
+    motion.addEventListener("change", updateMotion);
+    compact.addEventListener("change", updateCompact);
+    return () => {
+      motion.removeEventListener("change", updateMotion);
+      compact.removeEventListener("change", updateCompact);
+    };
   }, []);
-
-  // Polls the country-data staleness flags (see lib/country-staleness-check.ts
-  // + app/api/country-staleness/route.ts) set by the once-daily cron check
-  // that cross-references curated country-details.ts profiles against the
-  // live signal feed — e.g. catching a leader captured/killed/replaced or a
-  // war starting/ending before the curated profile is manually updated.
-  // This is a cheap read-only DB query (no Gemini call), so a longer poll
-  // interval here is just to pick up newly-set/cleared flags without a
-  // full page reload, not to limit request cost.
+  useEffect(() => {
+    if (!mapPrefsReady) return;
+    window.localStorage.setItem("dashboard-map-view-mode", mapViewMode);
+    window.localStorage.setItem("dashboard-scan-sweep", String(scanEnabled));
+  }, [mapViewMode, scanEnabled, mapPrefsReady]);
   useEffect(() => {
     const fetchStaleFlags = async () => {
       try {
         const res = await axios.get("/api/country-staleness");
         setStaleCountryFlags(res.data?.flags || []);
-      } catch (error) {
-        console.error("Failed to fetch country staleness flags:", error);
-      }
+      } catch (error) { console.error("Failed to fetch country staleness flags:", error); }
     };
     fetchStaleFlags();
-    const interval = setInterval(fetchStaleFlags, 60 * 60 * 1000); // 1h
+    const interval = setInterval(fetchStaleFlags, 3600000);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    window.localStorage.setItem("dashboard-map-view-mode", mapViewMode);
-  }, [mapViewMode]);
-
-  // Re-show the PiP mini player each time the user switches back to the Map
-  // tab on mobile, so a dismissal doesn't stick permanently.
-  useEffect(() => {
-    if (mobileView === "map") setPipDismissed(false);
-  }, [mobileView]);
-
-  // Client-side filter by active categories, then by recency (time-range
-  // selector). `activeTimeRangeHours === null` means no time filter (show
-  // events of any age).
-  // Memoized so downstream consumers (WorldMap's marker layers and radar
-  // sweep in particular) only see a new `events` array reference when the
-  // underlying data or filters actually change, instead of on every
-  // unrelated Dashboard re-render (naval polling, clock ticks, etc.) — that
-  // churn was forcing the map to redo per-frame work needlessly, which is
-  // what made the sweep animation stutter over a long session.
-  const events = useMemo(
-    () =>
-      allEvents
-        .filter((e) => activeCategories.includes(e.category))
-        .filter((e) => {
-          if (activeTimeRangeHours === null) return true;
-          const ageMs = Date.now() - new Date(e.timestamp).getTime();
-          return ageMs <= activeTimeRangeHours * 60 * 60 * 1000;
-        })
-        .filter((e) => {
-          if (verification === "all") return true;
-          return verification === "unconfirmed" ? isUnconfirmedSource(e.source) : !isUnconfirmedSource(e.source);
-        }),
-    [allEvents, activeCategories, activeTimeRangeHours, verification]
-  );
-
+  const events = useMemo(() => scopeReports(allEvents, { categories: activeCategories, hours: activeTimeRangeHours,
+    verification, query: signalQuery, now: Date.now() }),
+  [allEvents, activeCategories, activeTimeRangeHours, verification, signalQuery]);
+  const groups = useMemo(() => groupIncidents(events), [events]);
+  const selectedEvent = reportLocation ? events.find(event => event.id === reportLocation.snapshot.id) ||
+    resolveReport(reportLocation.snapshot, allEvents).event : null;
+  const mapEvents = useMemo(() => groupedReports ? groups.map(group =>
+    group.reports.find(event => event.id === selectedEvent?.id) || group.latest) : events,
+  [groupedReports, groups, selectedEvent?.id, events]);
+  const reportGroupCounts = useMemo(() => Object.fromEntries(groups.flatMap(group =>
+    group.reports.map(event => [event.id, group.reports.length]))), [groups]);
   const allOn = activeCategories.length === ALL_CATEGORIES.length;
-
+  const scopeLabel = `${allOn ? "All categories" : `${activeCategories.length} selected categories`} · ${activeTimeRangeHours === null ? "any time" : `past ${activeTimeRangeHours} hours`} · ${verification === "all" ? "all source classifications" : `${verification} sources`}${signalQuery.trim() ? ` · search: ${signalQuery.trim()}` : ""}`;
+  const clearSelection = () => {
+    dispatchReport({ type: "close" }); setSelectedMilitaryBase(null); setSelectedFleetGroup(null);
+    setSelectedPort(null); setSelectedCountry(null); setSelectedConflictZone(null); setSelectedCluster(null);
+  };
   const handleEventSelect = (event: Event | null) => {
-    setSelectedEvent(event);
-    setDetailPanelOpen(!!event);
-    if (event) {
-      setSelectedMilitaryBase(null);
-      setSelectedFleetGroup(null);
-      setSelectedPort(null);
-    }
+    clearSelection();
+    if (event) dispatchReport({ type: "open", event });
   };
-
-  const handleCloseDetail = () => {
-    setDetailPanelOpen(false);
-    setSelectedEvent(null);
-  };
-
-  const handleMilitaryBaseSelect = (base: MilitaryBaseData | null) => {
-    setSelectedMilitaryBase(base);
-    if (base) {
-      setSelectedEvent(null);
-      setDetailPanelOpen(false);
-      setSelectedFleetGroup(null);
-      setSelectedPort(null);
-    }
-  };
-
-  const handleFleetGroupSelect = (group: FleetGroup | null) => {
-    setSelectedFleetGroup(group);
-    if (group) {
-      setSelectedEvent(null);
-      setDetailPanelOpen(false);
-      setSelectedMilitaryBase(null);
-      setSelectedPort(null);
-    }
-  };
-
-  const handlePortSelect = (port: PortData | null) => {
-    setSelectedPort(port);
-    if (port) {
-      setSelectedEvent(null);
-      setDetailPanelOpen(false);
-      setSelectedMilitaryBase(null);
-      setSelectedFleetGroup(null);
-    }
-  };
-
-  const handleCountrySelect = (name: string) => {
-    setSelectedCountry({ name, details: COUNTRY_DETAILS[name] });
-    setSelectedEvent(null);
-    setDetailPanelOpen(false);
-    setSelectedMilitaryBase(null);
-    setSelectedFleetGroup(null);
-    setSelectedPort(null);
-  };
-
+  const handleMilitaryBaseSelect = (base: MilitaryBaseData | null) => { clearSelection(); setSelectedMilitaryBase(base); };
+  const handleFleetGroupSelect = (group: FleetGroup | null) => { clearSelection(); setSelectedFleetGroup(group); };
+  const handlePortSelect = (port: PortData | null) => { clearSelection(); setSelectedPort(port); };
+  const handleCountrySelect = (name: string) => { clearSelection(); setSelectedCountry({ name, details: COUNTRY_DETAILS[name] }); };
   const handleClusterSelect = (cluster: CorrelationCluster | null) => {
-    setSelectedCluster(cluster);
-    if (cluster) {
-      setSelectedEvent(null);
-      setDetailPanelOpen(false);
-      setSelectedMilitaryBase(null);
-      setSelectedFleetGroup(null);
-      setSelectedPort(null);
-    }
+    clearSelection(); setSelectedCluster(cluster);
+    if (cluster) setMobileView("map");
   };
-
   const toggleLayer = (layer: MapLayerKey) => {
-    setActiveLayers((prev) => {
-      const next = !prev[layer];
-      // Default the military-base sub-filter to "Major" every time the layer
-      // is switched on, so users see the higher-signal bases first instead
-      // of the full unfiltered list.
-      if (layer === "militaryBases" && next) {
-        setMilitaryBaseFilter("major");
-      }
-      if (layer === "ports" && next) {
-        setPortFilter("major");
-      }
-      if (layer === "fleetTracker" && next) {
-        setFleetRegionFilter("all");
-      }
-      return { ...prev, [layer]: next };
-    });
+    if (!activeLayers[layer]) {
+      if (layer === "militaryBases") setMilitaryBaseFilter("major");
+      if (layer === "ports") setPortFilter("major");
+      if (layer === "fleetTracker") setFleetRegionFilter("all");
+    }
+    setActiveLayers((previous) => ({ ...previous, [layer]: !previous[layer] }));
   };
-
   const mapProps = {
-    events,
-    selectedEvent,
-    onSelectEvent: handleEventSelect,
-    activeLayers,
-    layerData:
-      layerData && (militaryBaseFilter !== "all" || portFilter !== "all")
-        ? {
-            ...layerData,
-            militaryBases:
-              militaryBaseFilter === "all"
-                ? layerData.militaryBases
-                : layerData.militaryBases.filter((b) =>
-                    militaryBaseFilter === "major" ? b.isMajor : !b.isMajor
-                  ),
-            ports:
-              portFilter === "all"
-                ? layerData.ports
-                : layerData.ports.filter((p) => (portFilter === "major" ? p.isMajor : !p.isMajor)),
-          }
-        : layerData,
+    events: mapEvents, reportGroupCounts: groupedReports ? reportGroupCounts : {}, selectedEvent, onSelectEvent: handleEventSelect, activeLayers,
+    layerData: layerData && (militaryBaseFilter !== "all" || portFilter !== "all") ? {
+      ...layerData,
+      militaryBases: militaryBaseFilter === "all" ? layerData.militaryBases : layerData.militaryBases.filter((base) => militaryBaseFilter === "major" ? base.isMajor : !base.isMajor),
+      ports: portFilter === "all" ? layerData.ports : layerData.ports.filter((port) => portFilter === "major" ? port.isMajor : !port.isMajor),
+    } : layerData,
     navalVessels: activeLayers.navalVessels ? navalVessels : [],
     wildfires: activeLayers.wildfires ? wildfires : [],
     storms: activeLayers.storms ? storms : [],
     gpsJamHexes: activeLayers.gpsJamming ? gpsJamHexes : [],
-    fleetGroups:
-      activeLayers.fleetTracker
-        ? fleetRegionFilter === "all"
-          ? fleetGroups
-          : fleetGroups.filter((g) => g.id === fleetRegionFilter)
-        : [],
-    onSelectConflictZone: setSelectedConflictZone,
-    selectedConflictZone,
-    selectedMilitaryBase,
-    onSelectMilitaryBase: handleMilitaryBaseSelect,
-    selectedFleetGroup,
-    onSelectFleetGroup: handleFleetGroupSelect,
-    onSelectCountry: handleCountrySelect,
-    selectedCountryName: selectedCountry?.name ?? null,
-    mobileVisible: mobileView === "map",
-    selectedPort,
-    onSelectPort: handlePortSelect,
+    fleetGroups: activeLayers.fleetTracker ? fleetRegionFilter === "all" ? fleetGroups : fleetGroups.filter((group) => group.id === fleetRegionFilter) : [],
+    onSelectConflictZone: (zone: ConflictZoneData) => { clearSelection(); setSelectedConflictZone(zone); },
+    selectedConflictZone, selectedMilitaryBase, onSelectMilitaryBase: handleMilitaryBaseSelect,
+    selectedFleetGroup, onSelectFleetGroup: handleFleetGroupSelect,
+    onSelectCountry: handleCountrySelect, selectedCountryName: selectedCountry?.name ?? null,
+    mobileVisible: !compactView || mobileView === "map", selectedPort, onSelectPort: handlePortSelect,
     selectedCluster: selectedCluster ? { id: selectedCluster.id, lat: selectedCluster.centroid.lat, lng: selectedCluster.centroid.lng } : null,
+    scanEnabled: scanEnabled && !reducedMotion,
+    reducedMotion,
   };
-
-  // Shared layer-toggle definitions used by both the desktop dropdown and the
-  // mobile control sheet, so the two stay in sync automatically.
-  const mapLayerDefs: [MapLayerKey, string][] = [
-    ["tradeRoutes", "Trade Routes"],
-    ["conflictZones", "Conflict Zones"],
-    ["ports", "Ports"],
-    ["navalVessels", "Naval & Tanker Vessels"],
-    ["cables", "Submarine Cables"],
-    ["pipelines", "Oil & Gas Pipelines"],
-    ["militaryBases", "Military Bases"],
-    ["wildfires", "Wildfires"],
-    ["storms", "Storms"],
-    ["gpsJamming", "GPS Jamming"],
-    ["fleetTracker", "US Fleet Tracker (USNI)"],
-    ["countries", "Country Borders"],
-  ];
-  const layerStatusLabel = (key: MapLayerKey): string => {
-    if (key === "navalVessels" && activeLayers.navalVessels) {
-      return navalLoading ? "SCANNING…" : `ON (${navalVessels.length})`;
-    }
-    if (key === "wildfires" && activeLayers.wildfires) {
-      return wildfiresLoading && wildfires.length === 0 ? "LOADING…" : `ON (${wildfires.length})`;
-    }
-    if (key === "storms" && activeLayers.storms) {
-      return stormsLoading && storms.length === 0 ? "LOADING…" : `ON (${storms.length})`;
-    }
-    if (key === "gpsJamming" && activeLayers.gpsJamming) {
-      return gpsJamLoading && gpsJamHexes.length === 0 ? "LOADING…" : `ON (${gpsJamHexes.length})`;
-    }
-    if (key === "fleetTracker" && activeLayers.fleetTracker) {
-      return fleetLoading && fleetGroups.length === 0 ? "LOADING…" : `ON (${fleetGroups.length})`;
-    }
-    return activeLayers[key] ? "ON" : "OFF";
+  const layerStatusLabel = (key: MapLayerKey) => {
+    if (!activeLayers[key]) return "";
+    if (key === "navalVessels") return navalLoading ? "Scanning" : `${navalVessels.length}`;
+    if (key === "wildfires") return wildfiresLoading ? "Loading" : `${wildfires.length}`;
+    if (key === "storms") return stormsLoading ? "Loading" : `${storms.length}`;
+    if (key === "gpsJamming") return gpsJamLoading ? "Loading" : `${gpsJamHexes.length}`;
+    if (key === "fleetTracker") return fleetLoading ? "Loading" : `${fleetGroups.length}`;
+    return "";
+  };
+  const panel = panels.find((item) => item.id === activeTab)!;
+  const statusText = loading ? "Loading signals" : refreshing ? "Refreshing signals" : lastFetchError ? (lastUpdated ? "Update failed · cached reports" : "Signal feed unavailable") : `Updated ${lastUpdated}`;
+  const selectedLayerCount = Object.values(activeLayers).filter(Boolean).length;
+  const showMobileView = (view: typeof mobileView) => {
+    setMobileView(view);
+    if (view === "live") setLiveFeedCollapsed(false);
+    if (view === "map") setPipDismissed(false);
   };
 
   return (
-    <div className="flex h-screen flex-col bg-[#0a0a0a] text-slate-200">
-      {/* Top Bar */}
-      <header className="flex flex-col gap-2 border-b border-[#3a3a3a] bg-[#0e0e0e] px-3 py-2 sm:px-6 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-[#d4b36a]" />
-            <span className="text-xs font-bold uppercase tracking-widest text-[#d4b36a]">Sovergein Veil Analytics</span>
-          </div>
-          <span className="hidden text-xs text-slate-500 sm:inline">|</span>
-          <span className="hidden text-xs uppercase tracking-widest text-slate-500 sm:inline">
-            Global Intelligence Dashboard
+    <div className="desk-shell" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+      <header className="desk-masthead">
+        <button className="desk-brand" onClick={() => setDashboardActive(false)} aria-label="Sovereign Veil Analytics home">
+          <span className="desk-monogram">SV<span>A</span></span>
+          <span className="desk-brand-name">Sovereign Veil <span>Analytics</span></span>
+        </button>
+        <div className="desk-breadcrumb"><span>Workspace</span><span>/</span>Global overview</div>
+        <div className="desk-masthead-actions">
+          <span className={`desk-data-status${lastFetchError ? " is-error" : ""}`} role="status" title={lastFetchError || statusText}>
+            <i />{statusText}
           </span>
-        </div>
-
-        <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 md:flex-wrap md:gap-3 md:overflow-visible md:whitespace-normal md:pb-0">
-          {/* ALL toggle */}
-          <button
-            onClick={() => setAllCategories(allOn ? [] : ALL_CATEGORIES)}
-            className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
-              allOn
-                ? "border-[#d4b36a] text-[#d4b36a] bg-[#1e1e1e]"
-                : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-            }`}
-          >
-            ALL
-          </button>
-          {/* Per-category toggles */}
-          {ALL_CATEGORIES.map((cat) => {
-            const meta = categoryLabels[cat];
-            // While every category is active (default state), none show as individually
-            // highlighted — only the ALL button reflects that. The first click on a
-            // category exclusively selects it; further clicks multi-select from there.
-            const isOn = !allOn && activeCategories.includes(cat);
-            return (
-              <button
-                key={cat}
-                onClick={() => (allOn ? setAllCategories([cat]) : toggleCategory(cat))}
-                title={meta.tooltip}
-                style={isOn ? { borderColor: meta.color, color: meta.color } : {}}
-                className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest transition ${
-                  isOn ? "bg-[#1e1e1e]" : "border-slate-700 text-slate-400 opacity-40 hover:opacity-70"
-                }`}
-              >
-                {meta.label}
-              </button>
-            );
-          })}
-          <span className="ml-2 hidden shrink-0 text-[10px] text-slate-600 sm:inline whitespace-nowrap">
-            UPDATED: <span className="text-slate-400">{lastUpdated || "—"}</span>
-          </span>
-          {lastFetchError && (
-            <span
-              className="ml-2 hidden shrink-0 text-[10px] font-bold text-red-500 sm:inline whitespace-nowrap"
-              title={lastFetchError}
-            >
-              UPDATE FAILED — SHOWING STALE DATA
-            </span>
-          )}
-          {staleCountryFlags.length > 0 && (
-            <div className="relative ml-2 shrink-0">
-              <button
-                onClick={() => setStaleCountryPanelOpen((v) => !v)}
-                className="flex items-center gap-1 rounded border border-amber-600/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-amber-400 transition hover:bg-amber-900/50"
-                title="Some curated country profiles may be out of date based on recent live signals"
-              >
-                ⚠ {staleCountryFlags.length} Data Alert{staleCountryFlags.length !== 1 ? "S" : ""}
-              </button>
-              {staleCountryPanelOpen && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[90vw] rounded border border-amber-600/60 bg-[#0e0e0ecc] p-3 text-[10px] backdrop-blur">
-                  <p className="mb-2 text-slate-400">
-                    These curated country profiles may be stale — a recent live signal appears to contradict them.
-                    Review and update <code className="text-amber-400">lib/data/country-details.ts</code> if
-                    confirmed.
-                  </p>
-                  <div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
-                    {staleCountryFlags.map((flag) => (
-                      <div key={flag.country} className="rounded border border-slate-700 p-2">
-                        <div className="mb-1 font-bold uppercase tracking-wider text-amber-400">{flag.country}</div>
-                        <div className="text-slate-300">{flag.issue}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <AmbientAudio
-            playing={ambientPlaying}
-            onTogglePlaying={() => setAmbientPlaying((v) => !v)}
-            volume={ambientVolume}
-            onVolumeChange={setAmbientVolume}
-          />
+          <AmbientAudio playing={ambientPlaying} onTogglePlaying={() => setAmbientPlaying((value) => !value)}
+            volume={ambientVolume} onVolumeChange={setAmbientVolume} />
           <AuthWidget />
         </div>
       </header>
 
-      {/* Mobile view switcher — only shown below md breakpoint, split view handles desktop */}
-      <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e] md:hidden">
-        {(["map", "panel", "live"] as const).map((view) => (
-          <button
-            key={view}
-            onClick={() => setMobileView(view)}
-            className={`flex-1 min-h-[44px] px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
-              mobileView === view
-                ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
-                : "border-transparent text-slate-500"
-            }`}
-          >
-            {view === "map" ? "MAP" : view === "panel" ? "SIGNALS & PANELS" : "LIVE FEED"}
+      <div className={`desk-stage mobile-${mobileView}`}>
+        <nav className="desk-rail" aria-label="Analysis views">
+          <div className="desk-rail-label">DESK</div>
+          {panels.map(({ id, label, icon: Icon }) => (
+            <button key={id} className={`desk-rail-button${activeTab === id ? " is-active" : ""}`}
+              onClick={() => setActiveTab(id)} aria-label={label} aria-current={activeTab === id ? "page" : undefined}>
+              <Icon size={21} strokeWidth={1.6} /><span className="desk-rail-tooltip">{label}</span>
+            </button>
+          ))}
+          <button className={`desk-rail-button desk-rail-live${!liveFeedCollapsed ? " is-active" : ""}`}
+            onClick={() => setLiveFeedCollapsed((value) => !value)} aria-label="Toggle live broadcasts" aria-pressed={!liveFeedCollapsed}>
+            <Tv size={20} strokeWidth={1.6} /><span className="desk-rail-tooltip">Live broadcasts</span>
           </button>
-        ))}
-      </div>
+          <button className="desk-rail-button" onClick={() => setDashboardActive(false)} aria-label="Back to introduction">
+            <ArrowLeft size={19} /><span className="desk-rail-tooltip">Introduction</span>
+          </button>
+        </nav>
 
-      {/* Main Content */}
-      <div className="relative flex flex-1 min-h-0 overflow-hidden flex-col md:flex-row">
-        {/* Sidebar with Tabs - on LEFT (desktop) / toggled full-screen panel (mobile) */}
-        <div
-          style={{ ["--sidebar-w" as any]: `${sidebarWidth}px` }}
-          className={`w-full flex-col bg-[#0e0e0e] border-r border-[#3a3a3a] flex-1 min-h-0 md:flex md:w-[var(--sidebar-w)] md:flex-none md:shrink-0 ${
-            mobileView === "panel" || mobileView === "live" ? "flex" : "hidden"
-          }`}
-        >
-          {/* Tab Buttons + Tab Content — on mobile, this whole block is
-              swapped out for the dedicated Live Feed panel below while
-              mobileView === "live" (previously the live streams player was
-              squeezed underneath these tabs on mobile, sharing the screen).
-              Desktop is untouched: both this block and the live streams
-              block always render together via md:flex. */}
-          <div className={`min-h-0 flex-col md:flex md:flex-1 ${mobileView === "live" ? "hidden" : "flex flex-1"}`}>
-            <div className="flex border-b border-[#3a3a3a] bg-[#1e1e1e]">
-              {(["events", "news", "stocks", "analyst", "patterns"] as SidebarTab[]).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 min-h-[44px] md:min-h-0 px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition border-b-2 ${
-                    activeTab === tab
-                      ? "border-[#d4b36a] text-[#d4b36a] bg-[#262626]"
-                      : "border-transparent text-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {tab === "events" && "SIGNALS"}
-                  {tab === "news" && "INSIGHTS"}
-                  {tab === "stocks" && "MARKETS"}
-                  {tab === "analyst" && "SVA ANALYST"}
-                  {tab === "patterns" && "PATTERNS"}
+        <aside className="desk-dock" aria-label="Analyst workspace">
+          <div className="desk-dock-main">
+            <header className="desk-dock-heading">
+              <div><span className="desk-eyebrow">ANALYST WORKSPACE</span><h1>{panel.title}</h1><p>{panel.subtitle}</p></div>
+              <div className="desk-heading-actions">
+                <label className="desk-mobile-panel-select"><span className="sr-only">Analysis view</span>
+                  <select aria-label="Analysis view" value={activeTab} onChange={(event) => setActiveTab(event.target.value as SidebarTab)}>
+                    {panels.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </label>
+                <button className="desk-icon-button" disabled={loading || refreshing} onClick={() => fetchEvents(true)} aria-label="Refresh signals" title="Refresh signals">
+                  <RefreshCw size={17} className={refreshing ? "desk-refreshing" : ""} />
                 </button>
-              ))}
-            </div>
-
-            {/* Tab Content */}
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              {activeTab === "events" && (
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  <EventList
-                    events={events}
-                    loading={loading}
-                    onSelectEvent={handleEventSelect}
-                    selectedEvent={selectedEvent}
-                    verification={verification}
-                    onVerificationChange={setVerification}
-                  />
-                </div>
-              )}
+              </div>
+            </header>
+            <div className="desk-panel-content">
+              {activeTab === "events" && <EventList events={events} loading={loading} error={lastFetchError} onSelectEvent={handleEventSelect}
+                selectedEvent={selectedEvent} verification={verification} onVerificationChange={setVerification}
+                query={signalQuery} onQueryChange={setSignalQuery} groups={groups} grouped={groupedReports} onGroupedChange={setGroupedReports} quality={signalQuality} />}
               {activeTab === "news" && <NewsPanel />}
               {activeTab === "stocks" && <StockMarketPanel />}
               {activeTab === "analyst" && <AIAnalystPanel events={events} />}
-              {activeTab === "patterns" && (
-                <PatternAlertsPanel
-                  onSelectCluster={handleClusterSelect}
-                  selectedClusterId={selectedCluster?.id ?? null}
-                />
-              )}
+              {activeTab === "patterns" && <PatternAlertsPanel onSelectCluster={handleClusterSelect} selectedClusterId={selectedCluster?.id ?? null} />}
             </div>
           </div>
+          <div className="desk-broadcast-dock">
+            <LiveBroadcasts collapsed={liveFeedCollapsed} onToggleCollapsed={() => setLiveFeedCollapsed((value) => !value)} onActiveChannelChange={setPipChannel} />
+          </div>
+        </aside>
+        <div className="desk-resizer" onMouseDown={startDrag} role="separator" aria-label="Resize analyst workspace"
+          aria-orientation="vertical" aria-valuemin={320} aria-valuemax={720} aria-valuenow={sidebarWidth} tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setSidebarWidth((width) => Math.min(720, Math.max(320, width + (event.key === "ArrowLeft" ? -20 : 20))));
+            }
+          }} />
 
-          {/* Live Streams — its own container, independent of the active tab,
-              so it stays visible no matter which tab (Signals/Global
-              Analysis/Markets/AI Analyst) is selected on desktop. On mobile
-              it's now its own dedicated "Live Feed" panel (full screen,
-              via the view switcher above) instead of being squeezed under
-              the tabs — this block is hidden on mobile unless that panel is
-              active, but always visible on desktop (md:flex). The collapse
-              toggle lives inside LiveBroadcasts itself, on the Curated/Search
-              row. No drag handle here anymore — the video area is now a
-              fixed 16:9 box, so a draggable height no longer had any effect. */}
-          <div
-            className={`shrink-0 flex-col border-t border-[#3a3a3a] md:flex ${
-              mobileView === "live" ? "flex flex-1 min-h-0" : "hidden"
-            }`}
-          >
-            <div className="shrink-0 overflow-y-auto md:block md:flex-none flex-1 min-h-0">
-              <LiveBroadcasts
-                collapsed={liveFeedCollapsed}
-                onToggleCollapsed={() => setLiveFeedCollapsed((v) => !v)}
-                onActiveChannelChange={setPipChannel}
-              />
+        <section className="desk-map-section" aria-label="Global map">
+          <div className="desk-map-toolbar">
+            <div className="desk-map-title"><Globe2 size={16} /><span>World view</span></div>
+            <div className="desk-map-tools">
+              <WorkspacePopover label={allOn ? "All categories" : `${activeCategories.length} categories`} title="Signal categories"
+                icon={<ListFilter size={16} />} open={categoriesOpen} onOpenChange={(open) => { setCategoriesOpen(open); if (open) setLayersMenuOpen(false); }}>
+                <div className="desk-filter-actions">
+                  <button onClick={() => setAllCategories(ALL_CATEGORIES)}>Select all</button>
+                  <button onClick={() => setAllCategories([])}>Clear</button>
+                </div>
+                <p className="desk-popover-note">Filter the map and signal ledger.</p>
+                {ALL_CATEGORIES.map((category) => (
+                  <label key={category} className="desk-option">
+                    <input type="checkbox" checked={activeCategories.includes(category)} onChange={() => toggleCategory(category)} />
+                    <i className="desk-category-key" style={{ background: categoryMeta[category].color }} />
+                    <span>{categoryMeta[category].label}</span>
+                    <button className="desk-only-button" onClick={() => setAllCategories([category])} aria-label={`Show only ${categoryMeta[category].label.toLowerCase()}`}>Only</button>
+                  </label>
+                ))}
+                <label className="desk-select-label">Source verification
+                  <select aria-label="Source verification" value={verification} onChange={(event) => setVerification(event.target.value as VerificationFilter)}>
+                    <option value="all">All reports</option><option value="confirmed">Confirmed sources</option><option value="unconfirmed">Unconfirmed sources</option>
+                  </select>
+                </label>
+              </WorkspacePopover>
+              <label className="desk-time-select"><span className="sr-only">Signal time range</span>
+                <select aria-label="Signal time range" value={activeTimeRangeHours ?? "all"} onChange={(event) => setActiveTimeRangeHours(event.target.value === "all" ? null : Number(event.target.value))}>
+                  {TIME_RANGES.map((range) => <option key={range.label} value={range.hours ?? "all"}>{range.label}</option>)}
+                </select><ChevronDown size={13} aria-hidden="true" />
+              </label>
+              <WorkspacePopover label={`Layers${selectedLayerCount ? ` · ${selectedLayerCount}` : ""}`} title="Map layers"
+                icon={<Layers size={16} />} open={layersMenuOpen} onOpenChange={(open) => { setLayersMenuOpen(open); if (open) setCategoriesOpen(false); }}>
+                <p className="desk-popover-note">Add geographic context. Each source has its own coverage and update cycle.</p>
+                {mapLayerDefs.map(([key, label]) => (
+                  <div className="desk-layer-row" key={key}>
+                    <label className="desk-option">
+                      <input type="checkbox" checked={activeLayers[key]} onChange={() => toggleLayer(key)} />
+                      <span>{label}</span><small>{layerStatusLabel(key)}</small>
+                    </label>
+                    {key === "militaryBases" && activeLayers.militaryBases && (
+                      <label className="desk-subfilter">Installations
+                        <select aria-label="Installations" value={militaryBaseFilter} onChange={(event) => setMilitaryBaseFilter(event.target.value as typeof militaryBaseFilter)}>
+                          <option value="all">All bases</option><option value="major">Major bases</option><option value="minor">Minor bases</option>
+                        </select>
+                      </label>
+                    )}
+                    {key === "ports" && activeLayers.ports && (
+                      <label className="desk-subfilter">Seaports
+                        <select aria-label="Seaports" value={portFilter} onChange={(event) => setPortFilter(event.target.value as typeof portFilter)}>
+                          <option value="all">All ports</option><option value="major">Major ports</option><option value="minor">Minor ports</option>
+                        </select>
+                      </label>
+                    )}
+                    {key === "navalVessels" && activeLayers.navalVessels && <p className="desk-layer-note">{navalOutage ? "AIS provider unavailable. Retrying automatically." : "Daily cached AIS scan; sparse military and tanker coverage. Red markers identify sanctioned Russia-flagged vessels (FleetLeaks)."}{navalLastChecked && ` Checked ${navalLastChecked}.`}</p>}
+                    {key === "storms" && activeLayers.storms && <p className="desk-layer-note">NOAA NHC: Atlantic and Eastern/Central Pacific only, not global coverage.</p>}
+                    {key === "fleetTracker" && activeLayers.fleetTracker && <>
+                      {fleetGroups.length > 0 && <label className="desk-subfilter">Region
+                        <select aria-label="Fleet region" value={fleetRegionFilter} onChange={(event) => setFleetRegionFilter(event.target.value)}>
+                          <option value="all">All regions</option>{fleetGroups.map((group) => <option key={group.id} value={group.id}>{group.region}</option>)}
+                        </select>
+                      </label>}
+                      <p className="desk-layer-note">USNI weekly reporting. Approximate regions, not exact positions.{fleetLastChecked && ` Checked ${fleetLastChecked}.`}</p>
+                    </>}
+                  </div>
+                ))}
+                <label className="desk-option desk-scan-option"><input type="checkbox" checked={scanEnabled && !reducedMotion} disabled={reducedMotion} onChange={() => setScanEnabled((value) => !value)} /><span>Scan sweep</span></label>
+                {reducedMotion && <p className="desk-layer-note">Motion is disabled by your device preference.</p>}
+              </WorkspacePopover>
+              <div className="desk-map-mode" aria-label="Map projection">
+                <button aria-pressed={mapViewMode === "2d"} onClick={() => setMapViewMode("2d")}>2D</button>
+                <button aria-pressed={mapViewMode === "3d"} onClick={() => setMapViewMode("3d")} title="3D globe (pre-alpha)">3D</button>
+              </div>
             </div>
           </div>
+          <div className="desk-map-viewport">
+            {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
+            {mapViewMode === "3d" && <span className="desk-globe-note">3D globe · pre-alpha</span>}
+            {selectedCluster && <div className="desk-cluster-selection"><Network size={15} /><span>Pattern selected</span><button className="desk-icon-button" aria-label="Clear selected pattern" onClick={() => setSelectedCluster(null)}><X size={16} /></button></div>}
+            {mobileView === "map" && pipChannel && !pipDismissed && !liveFeedCollapsed && (
+              <div className="desk-pip">
+                <div className="desk-pip-heading"><span>{pipChannel.name}</span><button aria-label="Close mini player" onClick={() => setPipDismissed(true)}><X size={15} /></button></div>
+                <div className="desk-pip-video">
+                  {pipChannel.hlsUrl ? <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
+                    : pipChannel.directEmbedUrl ? <iframe src={pipChannel.directEmbedUrl} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} />
+                    : pipChannel.videoId ? <iframe src={`https://www.youtube.com/embed/${pipChannel.videoId}?autoplay=1&mute=1&controls=0&rel=0`} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} /> : null}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="desk-map-footer">
+            <span><strong>{events.length}</strong> reports · {mapEvents.length} map entries</span>
+            <span>Color indicates category, not severity</span>
+            <span className="desk-footer-hint">Select a marker to explore</span>
+          </div>
+        </section>
+
+        <div className={`desk-detail-host${reportLocation ? " has-report" : ""}${reportNavigation.entries.length > 1 ? " has-dossier" : ""}`}>
+          {reportLocation && <EventDetailPanel key={reportNavigation.entries[0].key} navigation={reportNavigation} dispatch={dispatchReport}
+            loadedEvents={allEvents} scopedEvents={events} groups={groups} scopeLabel={scopeLabel} feedError={lastFetchError} feedLoading={loading} />}
+          <MilitaryBaseDetailPanel base={selectedMilitaryBase} onClose={() => setSelectedMilitaryBase(null)} />
+          <FleetTrackerDetailPanel group={selectedFleetGroup} sourceUrl={fleetSourceUrl} publishedAt={fleetPublishedAt} onClose={() => setSelectedFleetGroup(null)} />
+          <CountryDetailPanel country={selectedCountry} onClose={() => setSelectedCountry(null)} />
+          <PortDetailPanel port={selectedPort} onClose={() => setSelectedPort(null)} />
+          <ConflictZoneDetailPanel zone={selectedConflictZone} onClose={() => setSelectedConflictZone(null)} />
         </div>
-
-        {/* Drag handle to resize the sidebar width (desktop only) */}
-        <div
-          onMouseDown={startDrag}
-          className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-[#1e1e1e] hover:bg-[#d4b36a]/40 transition"
-          title="Drag to resize panel"
-        />
-
-        {/* Map - on RIGHT (desktop) / toggled full-screen panel (mobile) */}
-        <div className={`relative flex-1 md:block ${mobileView === "map" ? "block" : "hidden"}`}>
-          {/* Time-range selector — filters map/signal events by recency (desktop; consolidated into the mobile control sheet below on phones) */}
-          <div className="hidden md:flex absolute left-2 top-2 z-[999] gap-1 sm:left-4 sm:top-4">
-            {TIME_RANGES.map((tr) => {
-              const isOn = activeTimeRangeHours === tr.hours;
-              return (
-                <button
-                  key={tr.label}
-                  onClick={() => setActiveTimeRangeHours(tr.hours)}
-                  title={tr.hours === null ? "Show events of any age" : `Show events from the last ${tr.label}`}
-                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest backdrop-blur transition sm:px-2 sm:text-[10px] ${
-                    isOn
-                      ? "border-[#d4b36a] text-[#d4b36a] bg-[#1e1e1e]"
-                      : "border-slate-700 bg-[#0e0e0ecc] text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                  }`}
-                >
-                  {tr.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Map legend — visible on both desktop and mobile as a floating
-              overlay on the map itself (previously mobile-only had it tucked
-              inside the "Map Controls" bottom sheet, requiring an extra tap
-              to see it; now it's glanceable on the map at all widths). On
-              mobile it's sized/positioned to sit side-by-side with the PiP
-              live-feed mini player below (each taking half the width, same
-              fixed height) — reset back to its original auto-sized,
-              bottom-left placement at md+ (desktop). */}
-          <div className="absolute bottom-2 left-2 z-[999] h-28 w-[47vw] overflow-y-auto rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1.5 text-[9px] backdrop-blur sm:bottom-4 sm:left-4 sm:px-3 sm:py-2 sm:text-[10px] md:h-auto md:w-auto md:max-h-none">
-            {Object.entries(categoryLabels).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 py-0.5">
-                <div className="h-2 w-2 rounded-full" style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }} />
-                <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Event count badge (desktop; folded into the mobile control-sheet trigger below on phones) */}
-          <div className="hidden md:block absolute right-2 top-2 z-[999] rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-[10px]">
-            <span className="font-bold text-[#d4b36a]">{events.length}</span>
-            <span className="ml-1 text-slate-500">SIGNALS ACTIVE</span>
-          </div>
-
-          {/* Map controls — view toggle plus layer menu (desktop; consolidated into the mobile control sheet below on phones) */}
-          <div className="hidden md:flex absolute right-2 top-10 z-[999] flex-col items-end gap-2 sm:right-4 sm:top-12">
-            <div className="flex items-center gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] p-1 backdrop-blur">
-              {(["2d", "3d"] as const).map((mode) => {
-                const isOn = mapViewMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => setMapViewMode(mode)}
-                    className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-[0.2em] transition sm:px-3 sm:text-[10px] ${
-                      isOn
-                        ? "border border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                        : "border border-transparent text-slate-500 hover:text-slate-300"
-                    }`}
-                    title={mode === "2d" ? "Show the tactical 2D map" : "Show the rotating 3D globe"}
-                  >
-                    {mode === "3d" ? "3d (pre-alpha)" : mode}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div>
-              <button
-                onClick={() => setLayersMenuOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-1 text-[9px] uppercase tracking-wider text-slate-400 backdrop-blur transition hover:text-[#d4b36a] sm:px-3 sm:text-[10px]"
-              >
-                Map Layers
-                <span className={`transition-transform ${layersMenuOpen ? "rotate-180" : ""}`}>▾</span>
-              </button>
-
-              {layersMenuOpen && (
-                <div className="mt-1 flex flex-col gap-1 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-2 py-2 text-[9px] backdrop-blur sm:px-3 sm:text-[10px]">
-                  {mapLayerDefs.map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => toggleLayer(key)}
-                      className={`flex items-center justify-between gap-3 rounded border px-2 py-1 uppercase tracking-wider transition ${
-                        activeLayers[key]
-                          ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                          : "border-slate-700 text-slate-500 hover:text-slate-300"
-                      }`}
-                    >
-                      <span>{label}</span>
-                      <span>{layerStatusLabel(key)}</span>
-                    </button>
-                  ))}
-                  {activeLayers.militaryBases && (
-                    <div className="flex items-center gap-1 px-2 py-1">
-                      {(
-                        [
-                          ["all", "All"],
-                          ["major", "Major"],
-                          ["minor", "Minor"],
-                        ] as [typeof militaryBaseFilter, string][]
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMilitaryBaseFilter(value);
-                          }}
-                          className={`flex-1 rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
-                            militaryBaseFilter === value
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeLayers.ports && (
-                    <div className="flex items-center gap-1 px-2 py-1">
-                      {(
-                        [
-                          ["all", "All"],
-                          ["major", "Major"],
-                          ["minor", "Minor"],
-                        ] as [typeof portFilter, string][]
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPortFilter(value);
-                          }}
-                          className={`flex-1 rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
-                            portFilter === value
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeLayers.navalVessels && (
-                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                      {navalOutage ? (
-                        <span className="text-amber-500">
-                          AIS feed unavailable right now — the live data provider isn&apos;t
-                          streaming (known outage on their end). Retrying automatically.
-                        </span>
-                      ) : (
-                        <>
-                          Data refreshes once daily in the background — shown instantly from
-                          cache, no waiting. Military-flagged and tanker-flagged vessels are
-                          rare — 0 results on a given scan is expected. Red markers are
-                          sanctioned Russia-flagged vessels (FleetLeaks).
-                        </>
-                      )}
-                      {navalLastChecked && ` Last checked: ${navalLastChecked}.`}
-                    </p>
-                  )}
-                  {activeLayers.storms && (
-                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                      Covers Atlantic + Eastern/Central Pacific only (NOAA NHC) — not
-                      global.
-                    </p>
-                  )}
-                  {activeLayers.fleetTracker && fleetGroups.length > 0 && (
-                    <div className="flex flex-wrap gap-1 px-2 py-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFleetRegionFilter("all");
-                        }}
-                        className={`rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
-                          fleetRegionFilter === "all"
-                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                            : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                        }`}
-                      >
-                        All
-                      </button>
-                      {fleetGroups.map((g) => (
-                        <button
-                          key={g.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFleetRegionFilter(g.id);
-                          }}
-                          className={`rounded border px-1.5 py-0.5 text-center uppercase tracking-wider transition ${
-                            fleetRegionFilter === g.id
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
-                          }`}
-                        >
-                          {g.region}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeLayers.fleetTracker && (
-                    <p className="px-2 pt-1 text-[8px] normal-case tracking-normal text-slate-500">
-                      Approximate region only (USNI News reports named sea areas, not exact
-                      coordinates) — updated roughly weekly.
-                      {fleetLastChecked && ` Last checked: ${fleetLastChecked}.`}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Mobile control-sheet trigger — a single floating button that opens a
-              bottom sheet consolidating everything the four desktop overlays
-              show (time range, view mode, layer toggles, legend). Phone-only. */}
-          <button
-            onClick={() => setMobileControlsOpen(true)}
-            className="md:hidden absolute right-2 top-2 z-[999] flex min-h-[44px] items-center gap-2 rounded border border-[#3a3a3a] bg-[#0e0e0ecc] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-300 backdrop-blur"
-          >
-            <span className="text-[#d4b36a]">{events.length}</span>
-            <span>Map Controls</span>
-            <span>▾</span>
-          </button>
-
-          {mobileControlsOpen && (
-            <>
-              {/* Backdrop — tap outside the sheet to dismiss */}
-              <div
-                className="md:hidden fixed inset-0 z-[1100] bg-black/50"
-                onClick={() => setMobileControlsOpen(false)}
-              />
-              <div className="md:hidden fixed inset-x-0 bottom-0 z-[1101] max-h-[75vh] overflow-y-auto rounded-t-2xl border-t border-[#3a3a3a] bg-[#0e0e0ef8] px-4 pb-6 pt-3 text-xs backdrop-blur">
-                {/* Grab handle + close */}
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="h-1 w-10 rounded-full bg-slate-700" />
-                  <button
-                    onClick={() => setMobileControlsOpen(false)}
-                    className="min-h-[44px] min-w-[44px] rounded text-slate-400"
-                  >
-                    Close ✕
-                  </button>
-                </div>
-
-                {/* Time range */}
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Time Range</p>
-                <div className="mb-4 flex gap-2">
-                  {TIME_RANGES.map((tr) => {
-                    const isOn = activeTimeRangeHours === tr.hours;
-                    return (
-                      <button
-                        key={tr.label}
-                        onClick={() => setActiveTimeRangeHours(tr.hours)}
-                        className={`min-h-[44px] flex-1 rounded border text-[11px] font-bold uppercase tracking-widest transition ${
-                          isOn
-                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                            : "border-slate-700 text-slate-500"
-                        }`}
-                      >
-                        {tr.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* View mode */}
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">View</p>
-                <div className="mb-4 flex gap-2">
-                  {(["2d", "3d"] as const).map((mode) => {
-                    const isOn = mapViewMode === mode;
-                    return (
-                      <button
-                        key={mode}
-                        onClick={() => setMapViewMode(mode)}
-                        className={`min-h-[44px] flex-1 rounded border text-[11px] font-bold uppercase tracking-[0.2em] transition ${
-                          isOn
-                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                            : "border-slate-700 text-slate-500"
-                        }`}
-                      >
-                        {mode === "3d" ? "3D (pre-alpha)" : mode}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Ambient sound — the header's speaker icon uses a
-                    hover-to-reveal volume slider, which doesn't work on
-                    touch devices, so mobile users had no way to adjust
-                    volume (and the button itself is easy to miss in the
-                    cramped mobile header). This tap-friendly control drives
-                    the exact same shared playing/volume state as the header
-                    icon — same single <audio> element, no duplicate
-                    playback. */}
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Ambient Sound</p>
-                <div className="mb-4 flex items-center gap-3">
-                  <button
-                    onClick={() => setAmbientPlaying((v) => !v)}
-                    className={`flex min-h-[44px] items-center gap-2 rounded border px-3 uppercase tracking-wider transition ${
-                      ambientPlaying
-                        ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                        : "border-slate-700 text-slate-500"
-                    }`}
-                  >
-                    <span>{ambientPlaying ? "\u{1F50A}" : "\u{1F507}"}</span>
-                    <span>{ambientPlaying ? "Playing" : "Muted"}</span>
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={ambientVolume}
-                    onChange={(e) => setAmbientVolume(parseFloat(e.target.value))}
-                    className="h-11 flex-1 accent-[#d4b36a]"
-                  />
-                </div>
-
-                {/* Map layers */}
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Map Layers</p>
-                <div className="mb-4 flex flex-col gap-1.5">
-                  {mapLayerDefs.map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => toggleLayer(key)}
-                      className={`flex min-h-[44px] items-center justify-between gap-3 rounded border px-3 uppercase tracking-wider transition ${
-                        activeLayers[key]
-                          ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                          : "border-slate-700 text-slate-500"
-                      }`}
-                    >
-                      <span>{label}</span>
-                      <span>{layerStatusLabel(key)}</span>
-                    </button>
-                  ))}
-                  {activeLayers.militaryBases && (
-                    <div className="flex items-center gap-1.5">
-                      {(
-                        [
-                          ["all", "All"],
-                          ["major", "Major"],
-                          ["minor", "Minor"],
-                        ] as [typeof militaryBaseFilter, string][]
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          onClick={() => setMilitaryBaseFilter(value)}
-                          className={`min-h-[38px] flex-1 rounded border text-center uppercase tracking-wider transition ${
-                            militaryBaseFilter === value
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeLayers.ports && (
-                    <div className="flex items-center gap-1.5">
-                      {(
-                        [
-                          ["all", "All"],
-                          ["major", "Major"],
-                          ["minor", "Minor"],
-                        ] as [typeof portFilter, string][]
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          onClick={() => setPortFilter(value)}
-                          className={`min-h-[38px] flex-1 rounded border text-center uppercase tracking-wider transition ${
-                            portFilter === value
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeLayers.fleetTracker && fleetGroups.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        onClick={() => setFleetRegionFilter("all")}
-                        className={`min-h-[38px] rounded border px-2 text-center uppercase tracking-wider transition ${
-                          fleetRegionFilter === "all"
-                            ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                            : "border-slate-700 text-slate-500"
-                        }`}
-                      >
-                        All
-                      </button>
-                      {fleetGroups.map((g) => (
-                        <button
-                          key={g.id}
-                          onClick={() => setFleetRegionFilter(g.id)}
-                          className={`min-h-[38px] rounded border px-2 text-center uppercase tracking-wider transition ${
-                            fleetRegionFilter === g.id
-                              ? "border-[#d4b36a] bg-[#1e1e1e] text-[#d4b36a]"
-                              : "border-slate-700 text-slate-500"
-                          }`}
-                        >
-                          {g.region}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Legend */}
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Legend</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  {Object.entries(categoryLabels).map(([key, val]) => (
-                    <div key={key} className="flex items-center gap-2 py-0.5">
-                      <div
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: val.color, boxShadow: `0 0 6px ${val.color}` }}
-                      />
-                      <span className="uppercase tracking-wider text-slate-400">{key.replace(/_/g, " ")}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
-
-          {/* Event Detail Panel — docked to the right edge of the map, scrollable.
-              Desktop-and-mobile-map-tab instance: unchanged from before. */}
-          <EventDetailPanel
-            event={selectedEvent}
-            onClose={handleCloseDetail}
-          />
-
-          {/* Military Base Detail Panel — docked to the right edge of the map, scrollable */}
-          <MilitaryBaseDetailPanel
-            base={selectedMilitaryBase}
-            onClose={() => setSelectedMilitaryBase(null)}
-          />
-
-          {/* Fleet Tracker Detail Panel — docked to the right edge of the map, scrollable */}
-          <FleetTrackerDetailPanel
-            group={selectedFleetGroup}
-            sourceUrl={fleetSourceUrl}
-            publishedAt={fleetPublishedAt}
-            onClose={() => setSelectedFleetGroup(null)}
-          />
-
-          {/* Country Detail Panel — docked to the right edge of the map, scrollable */}
-          <CountryDetailPanel
-            country={selectedCountry}
-            onClose={() => setSelectedCountry(null)}
-          />
-
-          {/* Port Detail Panel — docked to the right edge of the map, scrollable */}
-          <PortDetailPanel
-            port={selectedPort}
-            onClose={() => setSelectedPort(null)}
-          />
-
-          {/* Conflict Zone Detail Panel — docked to the right edge of the map, scrollable */}
-          <ConflictZoneDetailPanel
-            zone={selectedConflictZone}
-            onClose={() => setSelectedConflictZone(null)}
-          />
-        </div>
-
-        {/* Mobile-only: when the user is on the "Signals & Panels" tab (map is
-            hidden), the detail panels above are hidden along with it, so a tap
-            on an event/base/country from the list appeared to do nothing. This
-            duplicate, mobile-only (md:hidden) set renders the same panels as an
-            overlay on top of the Signals panel itself, only while that tab is
-            active. Desktop is completely untouched — this block never renders
-            at md+ widths. */}
-        {mobileView === "panel" && (
-          <div className="md:hidden">
-            <EventDetailPanel
-              event={selectedEvent}
-              onClose={handleCloseDetail}
-            />
-            <MilitaryBaseDetailPanel
-              base={selectedMilitaryBase}
-              onClose={() => setSelectedMilitaryBase(null)}
-            />
-            <FleetTrackerDetailPanel
-              group={selectedFleetGroup}
-              sourceUrl={fleetSourceUrl}
-              publishedAt={fleetPublishedAt}
-              onClose={() => setSelectedFleetGroup(null)}
-            />
-            <CountryDetailPanel
-              country={selectedCountry}
-              onClose={() => setSelectedCountry(null)}
-            />
-            <PortDetailPanel
-              port={selectedPort}
-              onClose={() => setSelectedPort(null)}
-            />
-            <ConflictZoneDetailPanel
-              zone={selectedConflictZone}
-              onClose={() => setSelectedConflictZone(null)}
-            />
-          </div>
-        )}
-
-        {/* Mobile-only Picture-in-Picture live feed mini player. The full
-            live-broadcast player lives in the sidebar, which is hidden on
-            mobile while mobileView === "map" (looking at the map). This
-            small floating window mirrors whichever curated channel is
-            currently selected there, so the live feed stays visible while
-            browsing the map. It mounts its own small video/iframe (separate
-            from the sidebar's), so switching to this tab doesn't interrupt
-            the full player. Gated by md:hidden — desktop never renders it.
-            Sized/positioned to match the map legend exactly (same fixed
-            height, half the screen width each) so the two sit side-by-side
-            across the bottom of the screen instead of overlapping. */}
-        {mobileView === "map" && pipChannel && !pipDismissed && (
-          <div className="md:hidden fixed bottom-2 right-2 z-[1000] flex h-28 w-[47vw] flex-col overflow-hidden rounded border border-[#3a3a3a] bg-black shadow-lg sm:bottom-4 sm:right-4">
-            <div className="flex shrink-0 items-center justify-between gap-1 bg-[#0e0e0ecc] px-1.5 py-1 backdrop-blur">
-              <div className="flex min-w-0 items-center gap-1">
-                <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
-                <span className="truncate text-[8px] font-bold uppercase tracking-widest text-slate-300">
-                  {pipChannel.name}
-                </span>
-              </div>
-              <button
-                onClick={() => setPipDismissed(true)}
-                className="shrink-0 px-1 text-slate-400 hover:text-[#d4b36a]"
-                title="Close mini player"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="min-h-0 w-full flex-1 bg-black">
-              {pipChannel.hlsUrl ? (
-                <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
-              ) : pipChannel.directEmbedUrl ? (
-                <iframe
-                  key={pipChannel.directEmbedUrl}
-                  src={pipChannel.directEmbedUrl}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  className="h-full w-full border-0"
-                  title={`${pipChannel.name} Live`}
-                />
-              ) : pipChannel.videoId ? (
-                <iframe
-                  key={pipChannel.videoId}
-                  src={`https://www.youtube.com/embed/${pipChannel.videoId}?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  className="h-full w-full border-0"
-                  title={`${pipChannel.name} Live`}
-                />
-              ) : null}
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* Initialization overlay — blurs the dashboard behind it while the
-          first data fetch is in flight, then flips to a green "ready" state
-          the user dismisses with a click. */}
-      {showInitOverlay && (
-        <div
-          className={`fixed inset-0 z-[99999] flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity ${
-            loading ? "cursor-default" : "cursor-pointer"
-          }`}
-          onClick={() => {
-            if (!loading) setShowInitOverlay(false);
-          }}
-        >
-          <div className="flex flex-col items-center gap-4 rounded border border-[#3a3a3a] bg-[#0e0e0ef2] px-10 py-8 text-center shadow-2xl">
-            <div
-              className={`h-3 w-3 rounded-full ${loading ? "animate-pulse bg-[#d4b36a]" : "bg-emerald-400"}`}
-              style={{ boxShadow: loading ? "0 0 10px #d4b36a" : "0 0 10px #34d399" }}
-            />
-            <p
-              className={`text-sm font-bold uppercase tracking-[0.25em] ${
-                loading ? "text-[#d4b36a]" : "text-emerald-400"
-              }`}
-            >
-              {loading ? "Initializing Data…" : "Initialized"}
-            </p>
-            {loading && (
-              <div className="h-1 w-56 overflow-hidden rounded-full bg-[#3a3a3a]">
-                <div className="init-loading-bar h-full w-1/3 rounded-full bg-[#d4b36a]" style={{ boxShadow: "0 0 8px #d4b36a" }} />
-              </div>
-            )}
-            {!loading && (
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Click to continue</p>
-            )}
-          </div>
-        </div>
-      )}
+      <footer className="desk-statusbar">
+        <span className={lastFetchError ? "desk-error-text" : ""}>{loading ? "Requesting signal feed..." : lastFetchError ? statusText : `Last successful refresh: ${lastUpdated}`}</span>
+        {staleCountryFlags.length > 0 && <WorkspacePopover label={`${staleCountryFlags.length} profile alerts`} title="Country profile alerts" icon={<Activity size={14} />}
+          open={staleCountryPanelOpen} onOpenChange={setStaleCountryPanelOpen}>
+          <p className="desk-popover-note">Recent reporting may contradict these curated profiles. Treat their details with caution until reviewed.</p>
+          {staleCountryFlags.map((flag) => <div className="desk-profile-alert" key={flag.country}><strong>{flag.country}</strong><p>{flag.issue}</p></div>)}
+        </WorkspacePopover>}
+        <span className="desk-statusbar-note">Public-source reporting / assess before acting</span>
+      </footer>
+      <nav className="desk-mobile-nav" aria-label="Mobile workspace">
+        {([{ id: "map", label: "Map", icon: Map }, { id: "panel", label: "Workspace", icon: Activity }, { id: "live", label: "Live", icon: Tv }] as const).map(({ id, label, icon: Icon }) => (
+          <button key={id} aria-current={mobileView === id ? "page" : undefined} onClick={() => showMobileView(id)}><Icon size={20} strokeWidth={1.6} /><span>{label}</span></button>
+        ))}
+      </nav>
     </div>
   );
 }

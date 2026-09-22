@@ -74,18 +74,13 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
   };
 
   return (
-    <div className="flex h-full flex-col p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#d4b36a]">SVA Analyst</h2>
-        <span className="text-[10px] text-slate-500">{events.length} active signals</span>
-      </div>
+    <div className="surface-panel">
+      <div className="analyst-context">{eventSnapshot.length} reports in context · AI-assisted interpretation</div>
 
-      <div className="flex-1 overflow-y-auto rounded border border-[#3a3a3a] bg-[#0f0f0f] p-3 space-y-3">
+      <div className="analyst-messages" role="log" aria-label="Analyst conversation" aria-live="polite">
         {messages.map((msg, idx) => (
-          <div key={idx} className={`text-xs ${msg.role === "assistant" ? "text-slate-300" : "text-[#e2c98b]"}`}>
-            <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest">
-              {msg.role === "assistant" ? "AI" : "You"}
-            </span>
+          <div key={idx} className="analyst-message">
+            <strong>{msg.role === "assistant" ? "SVA Analyst · AI" : "You"}</strong>
             <div className="space-y-2 leading-relaxed">
               {msg.content
                 .split(/\n\s*\n/)
@@ -100,41 +95,39 @@ export default function AIAnalystPanel({ events }: AIAnalystPanelProps) {
           </div>
         ))}
         {loading && (
-          <div className="text-xs text-slate-500">
-            <span className="mr-2 text-[10px] font-bold uppercase tracking-widest">AI</span>
-            Thinking...
-          </div>
+          <p className="surface-muted" role="status">Preparing a response...</p>
         )}
       </div>
 
-      {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
-
+      {messages.length === 1 && <div className="analyst-prompts">
+        {["Summarize the current situation.", "Which reports need closer scrutiny?"].map((prompt) => (
+          <button key={prompt} onClick={() => setInput(prompt)}>{prompt}</button>
+        ))}
+      </div>}
+      <div className="analyst-composer">
+      {error && <p className="surface-error" role="alert">{error}</p>}
       <form
-        className="mt-3 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           sendMessage();
         }}
       >
         <input
+          aria-label="Ask the analyst"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the analyst..."
-          className="flex-1 rounded border border-[#3a3a3a] bg-[#0c0c0c] px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-[#d4b36a] focus:outline-none"
         />
         <button
           type="submit"
           disabled={loading || !input.trim()}
-          className={`rounded border px-3 py-2 text-[10px] font-bold uppercase tracking-widest transition ${
-            loading || !input.trim()
-              ? "cursor-not-allowed border-slate-700 text-slate-600"
-              : "border-[#d4b36a] text-[#d4b36a] hover:bg-[#2a2a2a]"
-          }`}
+          className="surface-button"
         >
           {loading ? "Thinking..." : "Ask"}
         </button>
       </form>
+      <p>Answers may be incomplete or incorrect. Check original reporting before drawing conclusions.</p>
+      </div>
     </div>
   );
 }
-

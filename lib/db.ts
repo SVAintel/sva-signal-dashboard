@@ -1,7 +1,9 @@
 import { Pool } from "pg";
-import crypto from "crypto";
 import type { Event } from "@/lib/types";
 import type { FleetGroup } from "@/lib/data/fleet-group-type";
+import { reportCollections } from "@/lib/signal-pipeline";
+import { normalizeEventHistory, type EventHistoryRow } from "@/lib/signal-history";
+export type { EventHistoryRow } from "@/lib/signal-history";
 
 // Lightweight historical store backing the region/weekly-brief feature.
 // Vercel's serverless filesystem is ephemeral (nothing written to disk
@@ -174,10 +176,6 @@ function ensureSchema(): Promise<void> {
   return schemaReady;
 }
 
-function dedupKey(source: string, title: string): string {
-  return crypto.createHash("sha1").update(`${source}::${title}`).digest("hex");
-}
-
 // Upsert the latest event poll into history. Cheap/idempotent: events seen
 // again just bump last_seen_at, genuinely new ones get inserted. Also prunes
 // anything older than the retention window so the table doesn't grow
@@ -186,8 +184,9 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
   try {
     await ensureSchema();
     const db = getPool();
-    for (const evt of events) {
-      const key = dedupKey(evt.source, evt.title);
+    for (const report of events) {
+      for (const evt of reportCollections(report)) {
+      const key = report.article?.identity === "structured" ? report.id : evt.id;
       await db.query(
         `INSERT INTO event_snapshots (
           dedup_key, title, category, lat, lng, source, url, description,
@@ -205,10 +204,11 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
           evt.description ?? null,
           evt.aiNotes ?? null,
           evt.confidence ?? null,
-          evt.timestamp,
+          Number.isFinite(Date.parse(evt.timestamp)) ? evt.timestamp : null,
           JSON.stringify(evt.secondaryCategories ?? []),
         ]
       );
+      }
     }
     await db.query(`DELETE FROM event_snapshots WHERE first_seen_at < now() - interval '21 days';`);
   } catch (err) {
@@ -216,19 +216,6 @@ export async function recordEventSnapshot(events: Event[]): Promise<void> {
     // down the live event feed that depends on this same route.
     console.error("recordEventSnapshot failed:", err);
   }
-}
-
-export interface EventHistoryRow {
-  title: string;
-  category: string;
-  secondaryCategories: string[];
-  lat: number;
-  lng: number;
-  source: string;
-  url: string | null;
-  description: string | null;
-  eventTimestamp: string | null;
-  firstSeenAt: string;
 }
 
 export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> {
@@ -243,7 +230,7 @@ export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> 
        LIMIT 500;`,
       [days]
     );
-    return rows.map((r) => ({
+    return normalizeEventHistory(rows.map((r) => ({
       title: r.title,
       category: r.category,
       secondaryCategories: Array.isArray(r.secondary_categories) ? r.secondary_categories : [],
@@ -252,9 +239,9 @@ export async function getRecentEvents(days: number): Promise<EventHistoryRow[]> 
       source: r.source,
       url: r.url,
       description: r.description,
-      eventTimestamp: r.event_timestamp,
-      firstSeenAt: r.first_seen_at,
-    }));
+      eventTimestamp: r.event_timestamp ? new Date(r.event_timestamp).toISOString() : null,
+      firstSeenAt: new Date(r.first_seen_at).toISOString(),
+    })));
   } catch (err) {
     // History is a best-effort enrichment layer (e.g. unavailable in local dev
     // without a real Postgres connection string) — never let it 500 the caller.
@@ -572,4 +559,3 @@ export async function setUserPrefs(userId: string, prefs: Record<string, unknown
     [userId, JSON.stringify(prefs)]
   );
 }
-

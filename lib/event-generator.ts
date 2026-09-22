@@ -2,6 +2,8 @@ import { Event } from "@/lib/types";
 import Parser from "rss-parser";
 import { getAppCache, setAppCache } from "@/lib/db";
 import { haversineDistanceKm } from "@/lib/geo";
+import { processSignalFeed } from "@/lib/signal-pipeline";
+import { signalId } from "@/lib/signal-identity";
 
 const NEWS_API_KEY = process.env.NEXT_PUBLIC_NEWS_API_KEY || "";
 const ALPHA_VANTAGE_KEY = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_KEY || "";
@@ -333,9 +335,8 @@ export function nearestPlaceName(lat: number, lng: number): string {
 }
 
 // Fetch events from all real APIs with timeout
-export async function generateMockEvents(): Promise<Event[]> {
+export async function generateSignalFeed() {
   const events: Event[] = [];
-  let eventId = 1;
 
   try {
     // Fetch from real APIs in parallel with 5 second timeout each
@@ -351,14 +352,13 @@ export async function generateMockEvents(): Promise<Event[]> {
       fetchTelegramEvents(),
     ]);
 
-    const allEvents = results
-      .filter(r => r.status === 'fulfilled' && r.value)
-      .flatMap(r => (r as any).value || []);
+    const allEvents = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
 
     for (const rawEvent of allEvents) {
       const category = rawEvent.category as keyof typeof knownKnownsMap;
       const event: Event = {
-        id: `evt-${String(eventId++).padStart(4, "0")}`,
+        id: `raw-${signalId(JSON.stringify([rawEvent.source, rawEvent.url, rawEvent.title, rawEvent.timestamp]))}`,
+        sourceEventId: typeof rawEvent.sourceEventId === "string" ? rawEvent.sourceEventId : undefined,
         title: rawEvent.title,
         description: rawEvent.description,
         category: rawEvent.category,
@@ -376,7 +376,11 @@ export async function generateMockEvents(): Promise<Event[]> {
     console.error("Error fetching events:", error);
   }
 
-  return events.length > 0 ? events : getFallbackEvents();
+  return processSignalFeed(events.length > 0 ? events : getFallbackEvents());
+}
+
+export async function generateMockEvents(): Promise<Event[]> {
+  return (await generateSignalFeed()).events;
 }
 
 // Fallback events if APIs fail
@@ -394,50 +398,6 @@ function getFallbackEvents(): Event[] {
       confidence: "pending",
     },
   ];
-}
-
-// Shared text-classification helpers used by both NewsAPI and RSS ingestion
-const NEWS_EXCLUDE_KEYWORDS = [
-  "opinion", "editorial", "analysis:", "commentary", "column:", "review",
-  "how to", "tips for", "best of", "ranked:", "why you", "what you need",
-  "smithsonian", "museum", "anime", "crunchyroll", "movie", "film", "box office",
-  "actor", "actress", "celebrity", "oscars", "grammy", "grammys", "emmy", "emmys",
-  "concert", "music chart", "album", "billboard chart", "spotify", "tour dates",
-  "red carpet", "premiere", "biopic", "kardashian", "influencer", "tiktok star",
-  "sports", "video game", "riot games", "esports", "nfl", "nba", "mlb", "nhl",
-  "fifa", "premier league", "champions league", "world cup final",
-  "cricket", "t20", "odi", "ipl", "asia cup", "test match", "wicket", "wickets",
-  "batsman", "batsmen", "bowler", "bowling", "innings", "world series", "super bowl",
-  "playoffs", "semifinal", "quarterfinal", "grand slam", "wimbledon", "olympics",
-  "olympic", "tennis open", "pga tour", "golf tournament", "boxing match", "ufc ",
-  "formula 1", "grand prix", "nascar", "world cup group", "world cup match",
-  "league table", "transfer window", "manager sacked", "coach fired",
-  "entertainment", "streaming", "sequel", "tv show", "reality show",
-  "dancing with the stars", "the bachelor", "season finale", "season premiere",
-  "recipe", "fashion", "beauty", "horoscope", "crossword", "royal wedding",
-];
-
-const NEWS_BREAKING_SIGNALS = [
-  "killed", "dead", "attack", "airstrike", "missile", "bomb", "explosion",
-  "troops", "invasion", "seized", "arrest", "detained", "sanction", "strike",
-  "outbreak", "virus", "pandemic", "epidemic", "contamination",
-  "cyberattack", "hack", "breach", "ransomware",
-  "nuclear", "radiation", "warhead", "reactor",
-  "protest", "riot", "coup", "unrest", "demonstration",
-  "refugee", "displaced", "famine", "humanitarian crisis",
-  "pipeline", "blackout", "power grid", "energy crisis",
-  "breaking", "urgent", "developing", "update:", "latest:",
-  "fires on", "clashes", "offensive", "ceasefire", "escalat",
-  "militant", "insurgent", "insurgency", "extremist", "terrorist", "jihadist",
-  "junta", "martial law", "election fraud", "resigns amid",
-  "earthquake", "tsunami", "wildfire", "hurricane", "typhoon", "flood",
-  "landslide", "volcano", "eruption", "tornado", "cyclone", "avalanche",
-];
-
-function isBreakingNews(title: string, desc: string) {
-  const text = (title + " " + desc).toLowerCase();
-  if (NEWS_EXCLUDE_KEYWORDS.some(kw => hasKeyword(text, kw))) return false;
-  return NEWS_BREAKING_SIGNALS.some(kw => hasKeyword(text, kw));
 }
 
 // Category classification is score-based (count keyword occurrences per
@@ -568,24 +528,9 @@ async function fetchNewsAPIEvents() {
     const [h, e] = await Promise.all([headlinesRes.json(), everythingRes.json()]);
     const combined: any[] = [...(h.articles || []), ...(e.articles || [])];
 
-    // Deduplicate by title
-    const seen = new Set<string>();
-    const unique = combined.filter(a => {
-      const key = a.title?.slice(0, 60);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    const categoryCounts: Record<string, number> = {};
-
-    return unique
-      .filter((article: any) => isBreakingNews(article.title || "", article.description || ""))
-      .reduce((acc: any[], article: any) => {
+    return combined.filter(article => typeof article.title === "string").map((article: any) => {
         const { primary: category, secondary: secondaryCategories } = categorizeNewsText(article.title, article.description || "");
-        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-        if (categoryCounts[category] > 5) return acc; // max 5 per category
-        acc.push({
+        return {
           title: article.title,
           description: article.description || "Breaking news",
           location: geolocateFromText(article.title + " " + (article.description || "") + " " + (article.source?.name || "")),
@@ -593,10 +538,9 @@ async function fetchNewsAPIEvents() {
           url: article.url,
           category,
           secondaryCategories,
-          timestamp: new Date(article.publishedAt).toISOString(),
-        });
-        return acc;
-      }, []);
+          timestamp: Number.isFinite(Date.parse(article.publishedAt)) ? new Date(article.publishedAt).toISOString() : "",
+        };
+      });
   } catch (e) {
     console.error("NewsAPI error:", e);
     return [];
@@ -664,8 +608,6 @@ async function fetchRSSEvents() {
   }
 
   const parser = getRssParser();
-  const categoryCounts: Record<string, number> = {};
-  const seen = new Set<string>();
   const out: any[] = [];
 
   const results = await Promise.allSettled(
@@ -678,30 +620,21 @@ async function fetchRSSEvents() {
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
     const { feed, items } = r.value;
-    for (const item of items) {
+    for (const item of items.slice(0, 120)) {
       const title = (item.title || "").trim();
       const description = (item.contentSnippet || item.content || item.summary || "").trim();
       if (!title) continue;
 
-      const key = title.slice(0, 60);
-      if (seen.has(key)) continue;
-
-      if (!isBreakingNews(title, description)) continue;
-
       const { primary: category, secondary: secondaryCategories } = categorizeNewsText(title, description);
-      categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-      if (categoryCounts[category] > 8) continue; // cap per category across all RSS feeds combined
-
-      seen.add(key);
       out.push({
         title,
-        description: description ? description.slice(0, 240) : "Breaking news",
+        description: description.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
         location: geolocateFromText(title + " " + description + " " + feed.name),
         source: `RSS / ${feed.name}`,
-        url: item.link || feed.url,
+        url: item.link || undefined,
         category,
         secondaryCategories,
-        timestamp: item.isoDate ? new Date(item.isoDate).toISOString() : new Date().toISOString(),
+        timestamp: item.isoDate && Number.isFinite(Date.parse(item.isoDate)) ? new Date(item.isoDate).toISOString() : "",
       });
     }
   }
@@ -806,6 +739,7 @@ async function fetchUSGSEvents() {
         description: feature.properties.title || "Seismic activity detected",
         location: { lat: feature.geometry.coordinates[1], lng: feature.geometry.coordinates[0] },
         source: "USGS",
+        sourceEventId: feature.id ? String(feature.id) : undefined,
         url: feature.properties.url || "https://earthquake.usgs.gov",
         category: "natural_disaster",
         timestamp: new Date(feature.properties.time).toISOString(),
@@ -824,21 +758,22 @@ async function fetchGDELTEvents() {
     const timeout = setTimeout(() => controller.abort(), 5000);
     
     const res = await fetch(
-      "https://api.gdeltproject.org/api/v2/search?query=conflict&mode=artlist&maxrecords=6&format=json",
+      "https://api.gdeltproject.org/api/v2/search?query=conflict&mode=artlist&maxrecords=60&format=json",
       { signal: controller.signal, next: { revalidate: 1800 } }
     );
     clearTimeout(timeout);
     
     const data = await res.json();
     
-    return (data.articles || []).slice(0, 6).map((article: any) => ({
+    return (data.articles || []).slice(0, 60).map((article: any) => ({
       title: article.title,
       description: article.snippet || "Geopolitical event detected",
       location: geolocateFromText(article.title + " " + (article.snippet || "")),
       source: "GDELT",
       url: article.url,
       category: "war",
-      timestamp: new Date().toISOString(),
+      timestamp: article.seendate && Number.isFinite(Date.parse(String(article.seendate).replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z")))
+        ? new Date(String(article.seendate).replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z")).toISOString() : "",
     }));
   } catch (e) {
     console.error("GDELT error:", e);
@@ -859,7 +794,10 @@ async function fetchACLEDEvents() {
     clearTimeout(timeout);
     
     const text = await res.text();
-    const lines = text.split('\n').slice(1, 4); // Get first 3 rows
+    const csvLines = text.split('\n');
+    const headers = csvLines[0].split(",").map(value => value.trim().replace(/^"|"$/g, "").toLowerCase());
+    const upstreamIdIndex = headers.indexOf("event_id_cnty");
+    const lines = csvLines.slice(1, 4); // Get first 3 rows
     
     return lines
       .filter(line => line.trim())
@@ -879,6 +817,7 @@ async function fetchACLEDEvents() {
           description: desc,
           location,
           source: "ACLED",
+          sourceEventId: upstreamIdIndex >= 0 ? parts[upstreamIdIndex]?.trim().replace(/^"|"$/g, "") || undefined : undefined,
           url: "https://acleddata.com/data-export-tool",
           category: parts[5]?.includes("Violence") || parts[5]?.includes("Battle") ? "war" :
                    parts[5]?.includes("Protest") ? "counter_terrorism" : "war",
@@ -942,6 +881,7 @@ async function fetchEMSCEvents() {
         description: `Depth: ${feature.geometry.coordinates[2]}km - EMSC high-precision data`,
         location: { lat: feature.geometry.coordinates[1], lng: feature.geometry.coordinates[0] },
         source: "EMSC",
+        sourceEventId: feature.id || feature.properties.source_id ? String(feature.id || feature.properties.source_id) : undefined,
         url: feature.properties.source_id
           ? `https://www.emsc-csem.org/Earthquake/earthquake.php?id=${feature.properties.source_id}`
           : "https://www.emsc-csem.org",
@@ -1038,13 +978,13 @@ async function fetchTelegramChannel(channel: { name: string; handle: string }) {
       if (!text || text.length < 20) continue; // skip media-only / empty posts
       raw.push({ postId, text, datetime });
     }
-    // Most recent posts first, cap per channel so one prolific channel
-    // doesn't drown out the others — cap BEFORE translating to limit
-    // outbound translation calls.
-    const capped = raw.slice(-6);
+    // Limit translation work, not eligibility: relevance and the six-report
+    // channel quota run together after all cached collections are gathered.
+    const capped = raw.slice(-60);
+    const translationIds = new Set(capped.filter(m => NON_LATIN_RE.test(m.text)).slice(-6).map(m => m.postId));
 
     const translated = await Promise.all(
-      capped.map(async (m) => (NON_LATIN_RE.test(m.text) ? await translateToEnglish(m.text) : m.text))
+      capped.map(async (m) => (translationIds.has(m.postId) ? await translateToEnglish(m.text) : m.text))
     );
 
     return capped.map((m, i) => {

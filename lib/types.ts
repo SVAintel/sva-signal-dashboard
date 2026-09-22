@@ -1,5 +1,6 @@
 export interface Event {
   id: string;
+  sourceEventId?: string;
   title: string;
   category: string;
   // Additional categories this event also plausibly belongs to (e.g. a
@@ -15,6 +16,19 @@ export interface Event {
   description: string;
   aiNotes: string;
   confidence: string;
+  provenance?: ReportCollection[];
+  article?: {
+    identity: "url-headline" | "attributed-syndication" | "publisher-text" | "collection" | "structured";
+    canonicalUrl?: string;
+    publisherKey?: string;
+    publisherLabel?: string;
+    aliases?: string[];
+  };
+}
+
+export interface ReportCollection extends Omit<Event, "provenance" | "article"> {
+  provider: string;
+  publisher?: string;
 }
 
 export type VerificationFilter = "all" | "confirmed" | "unconfirmed";

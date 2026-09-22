@@ -1,0 +1,12 @@
+.env
+.env.*
+.git
+.github
+.vercel
+.next
+.next-check
+node_modules
+*.log
+*.tsbuildinfo
+.*-cache.json
+scripts
