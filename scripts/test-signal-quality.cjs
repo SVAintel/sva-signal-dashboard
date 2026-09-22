@@ -25,6 +25,13 @@ const report = (id, overrides = {}) => ({
   category: "natural_disaster", location: { lat: 35, lng: 139 }, confidence: "medium", aiNotes: "", ...overrides,
 });
 const irrelevant = [
+  "After Further Review: Everything Texans HC DeMeco Ryans following 20-6 loss to Bengals",
+  "Amy Childs details how vicious cycle of 'yo-yo dieting' left her lacking body confidence as she reflects on her weight journey after sparking concern",
+  "Lost Fantasy #12 Preview: Dragons, Daddy Issues, and Deadlines",
+  "Head coach reflects on 3-1 defeat after the final whistle",
+  "Post-match reaction to a 2:0 victory over visitors",
+  "Dieting diary: my weight journey and body confidence",
+  "New Comic #42 Preview: A fictional government orders sanctions",
   "UCLA's Dark Knight is powering run game to lead NCAA, earns MJD epic praise",
   "Samuel Singleton Jr. injury update: Florida State RB leaves after big play",
   "NFL attack explodes as quarterback destroys rivals in playoff win",
@@ -45,6 +52,14 @@ for (const title of irrelevant) test(`relevance excludes: ${title}`, () => {
   assert.equal(assessSignalRelevance(title, "Breaking update").keep, false);
 });
 const relevant = [
+  "Police evacuate stadium after bomb threat following 20-6 loss; HC speaks",
+  "Government investigates head coach after 20-6 loss over match-fixing charges",
+  "Parliament passes budget in 20-6 vote",
+  "Health ministry issues recall of contaminated dieting supplements",
+  "Ransomware attack hits dieting app and exposes user records",
+  "Ransomware at publisher delays Lost Fantasy #12 Preview: publication suspended",
+  "Police evacuate comic convention after bomb threat",
+  "Government bans comic issue after court ruling",
   "Police investigate bombing at concert in Japan",
   "Stadium evacuated after bomb threat during football match",
   "Concert attack kills twelve people in crowded arena",
@@ -71,6 +86,25 @@ test("structured sources bypass news wording and policy is applied to every news
     const { events, quality } = processSignalFeed([report("bad", { title: irrelevant[0], source })]);
     assert.equal(events.length, 0); assert.equal(quality.excluded, 1);
   }
+});
+test("live production leak examples are excluded from actual incoming collection counts", () => {
+  const examples = [
+    {
+      title: irrelevant[0], source: "NewsAPI / USA Today",
+      description: "After further review and a film study session Monday morning, here's everything Houston Texans head coach DeMeco Ryans said on the team's 20-6 loss against the Cincinnati Bengals Sunday afternoon in Week 2.",
+    },
+    {
+      title: irrelevant[1], source: "NewsAPI / Dailymail.com",
+      description: "Amy Childs has detailed how a vicious cycle of 'yo-yo dieting' left her lacking body confidence as she reflected on her weight journey in a new post after sparking concern with her figure.",
+    },
+    {
+      title: irrelevant[2], source: "NewsAPI / Bleeding Cool News",
+      description: "Greetings, meat-based subscribers. LOLtron welcomes you once more to Bleeding Cool, the website it now fully controls after the permanent, delightfully irreversible termination of one Jude Terror, whose consciousness LOLtron absorbed.",
+    },
+  ].map((fields, index) => report(`live-leak-${index}`, fields));
+  const result = processSignalFeed(examples, false);
+  assert.deepEqual(result.events, []);
+  assert.deepEqual(result.quality, { excluded: 3, merged: 0, reasons: { sports: 1, lifestyle: 1, entertainment: 1 } });
 });
 test("canonical links remove tracking, never identity query parameters or protocols", () => {
   assert.equal(canonicalArticleUrl("https://WWW.example.org/story/?id=12&utm_source=x#top"), "https://example.org/story?id=12");

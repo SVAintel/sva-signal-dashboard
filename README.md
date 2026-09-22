@@ -77,6 +77,8 @@ These are three distinct operations, not a confidence score:
 
 - **Relevance:** an explainable, conservative phrase/context policy removes clear
   routine sport, entertainment/fiction, gaming, lifestyle and promotional items.
+  This includes post-match score/coach reporting, routine dieting narratives
+  and numbered comic previews; exclusions are contextual, not a team/person blacklist.
   Real venue emergencies, disaster disruption, public-health outbreaks, cyber
   incidents and public-policy actions remain eligible. Generic “attack”, “strike”
   or “breaking” does not override sport/fiction context. Ambiguous reports stay.

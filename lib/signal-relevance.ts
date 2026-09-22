@@ -7,11 +7,13 @@ export function isStructuredSource(source: string): boolean {
 
 const SPORTS = /\b(?:ncaa|nfl|nba|mlb|nhl|ufc|fifa|cricket|tennis|golf|football|soccer|baseball|basketball|quarterback|running back|touchdowns?|wickets?|innings|playoffs?|semifinals?|quarterfinals?|premier league|champions league|world cup|olympics?|grand prix|formula (?:one|1)|transfer window|run game|florida state rb|college sports|boxing)\b/i;
 const SPORT_ROUTINE = /\b(?:scores?|results?|wins?|loses?|goals?|league|season|rankings?|coach|players?|athletes?|injur(?:y|ies)|transfers?|trade|touchdowns?|run game|rb|striker|batsman|tournament|olympics?|praise|stats|game|match|title race|fans)\b/i;
+const POST_MATCH = /\b(?:head coach|HC|post[ -]?(?:game|match)|half[ -]?time|matchday)\b/i;
+const SCORE_RESULT = /\b\d{1,3}\s*[-–:]\s*\d{1,3}\s+(?:loss|win|defeat|victory|draw)\b|\b(?:loss|win|defeat|victory|draw)\b.{0,40}\b\d{1,3}\s*[-–:]\s*\d{1,3}\b/i;
 const ENTERTAINMENT = /\b(?:movie|film|cinema|actor|actress|celebrity|singer|concert|album|oscars?|grammys?|emmys?|box office|red carpet|tv show|reality show|netflix|streaming series|c[eé]line dion|taylor swift|kardashian|sequel|biopic)\b/i;
 const FICTION = /\b(?:movie|film|series|novel|fictional|screenplay|trailer|plot|character|on screen)\b/i;
 const FICTION_ACTION = /\b(?:plot|scene|trailer|review|portray|portrays|fictional|starring|stars as|character|box office|sequel|streaming)\b/i;
 const GAMING = /\b(?:video games?|esports?|riot games|playstation|xbox|nintendo|fortnite|minecraft|call of duty|in.game|gameplay|gaming|steam sale)\b/i;
-const LIFESTYLE = /\b(?:horoscope|crossword|recipes?|beauty tips|skincare|fashion trends|weight loss|diet tips|sleep habits|dating tips|anti.aging|heart disease|heart attack|hidden debt|chronic stress|supplements?|superfoods?|longevity|workout|fitness tips|wellness|celebrity diet|tree of the year)\b/i;
+const LIFESTYLE = /\b(?:horoscope|crossword|recipes?|beauty tips|skincare|fashion trends|weight loss|diet tips|dieting|weight journey|body confidence|sleep habits|dating tips|anti.aging|heart disease|heart attack|hidden debt|chronic stress|supplements?|superfoods?|longevity|workout|fitness tips|wellness|celebrity diet|tree of the year)\b/i;
 const PROMOTION = /\b(?:sponsored content|advertorial|promo code|coupon code|shopping deals|best deals|buy now|product review|affiliate links)\b/i;
 
 const PUBLIC_POLICY = /\b(?:government|parliament|minister|president|senate|congress|court|police|regulator|central bank|federal reserve|elections?|ballot|legislation|treaty|sanctions?|political boycott|diplomatic boycott|human rights|public health|health ministry|health authorities|who declares|cdc warns)\b/i;
@@ -28,11 +30,15 @@ export function assessSignalRelevance(title: string, description = "", source = 
   if (!headline) return { keep: false, reason: "empty" };
   const text = `${headline} ${description.replace(/<[^>]*>/g, " ").slice(0, 4000)}`;
   const sportsOutlet = /\b(?:ESPN|Sky Sports|NBC Sports|Sports Illustrated|The Athletic)\b/i.test(source);
-  const sports = (SPORTS.test(headline) || sportsOutlet) && SPORT_ROUTINE.test(text);
+  const sports = (SPORTS.test(headline) || sportsOutlet) && SPORT_ROUTINE.test(text) ||
+    POST_MATCH.test(text) && SCORE_RESULT.test(headline);
   const entertainment = ENTERTAINMENT.test(headline);
+  const issuePreview = /^([^#]{1,100})#\d{1,5}\s+(?:preview|review)\s*:/i.exec(headline);
+  const comicPreview = !!issuePreview && !SPECIFIC_THREAT.test(issuePreview[1]) &&
+    !REAL_RESPONSE.test(issuePreview[1]) && !PUBLIC_POLICY.test(issuePreview[1]);
   const gaming = GAMING.test(headline);
   const lifestyle = LIFESTYLE.test(headline);
-  const fiction = FICTION.test(headline) && FICTION_ACTION.test(headline) ||
+  const fiction = comicPreview || FICTION.test(headline) && FICTION_ACTION.test(headline) ||
     gaming && /\b(?:review|gameplay|in.game|mission|plot|trailer|character)\b/i.test(headline);
   const publicPolicy = PUBLIC_POLICY.test(headline) && PUBLIC_ACTION.test(text) && !fiction;
   const humanHarm = /\b(?:kills?|killed|injures?|wounds?)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|twelve|dozens)\s+(?:people|fans|spectators|attendees)\b|\b\d+\s+(?:people\s+)?(?:dead|injured|wounded)\b/i.test(headline);
