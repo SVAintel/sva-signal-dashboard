@@ -4,7 +4,8 @@ import { MapContainer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Toolti
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
-import { categoryMeta } from "@/lib/categories";
+import { infrastructureSymbol, vesselSymbol, fireSymbol, stormSymbol, type MapSymbol } from "@/lib/map-symbols";
+import ReportMapMarkers from "./ReportMapMarkers";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
@@ -14,132 +15,17 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MapLibreTileLayer } from "./MapLibreTileLayer";
 
-const makeIcon = (color: string, selected = false) => {
-  const size = selected ? 13 : 9;
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="position:relative;width:${size}px;height:${size}px;">
-      <div class="marker-tap-hit-area"></div>
-      <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${color};border:1px solid #e0ded0;${selected ? "outline:2px solid #e0ded0;outline-offset:3px;" : ""}"></div>
-    </div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
-};
-
-const icons: Record<string, L.DivIcon> = {
-  war: makeIcon("#ef4444"),
-  counter_terrorism: makeIcon("#a855f7"),
-  natural_disaster: makeIcon("#f59e0b"),
-  market: makeIcon("#22d3ee"),
-  biological: makeIcon("#22c55e"),
-  political_unrest: makeIcon("#f97316"),
-  cyber: makeIcon("#06b6d4"),
-  nuclear: makeIcon("#84cc16"),
-  energy: makeIcon("#d97706"),
-  humanitarian: makeIcon("#f43f5e"),
-  general: makeIcon("#94a3b8"),
-};
-
-const selectedIcons = Object.fromEntries(
-  Object.entries(categoryMeta).map(([category, meta]) => [category, makeIcon(meta.color, true)])
-);
-
-// Naval vessel marker: a small square/diamond in slate-blue to visually
-// distinguish AIS-tracked ships from category event markers, with a heading
-// arrow when course data is available. Tankers reuse the same shapes in
-// amber (matching the oil pipeline color elsewhere), and sanctioned
-// Russia-flagged vessels (FleetLeaks) use red to visually flag them as a
-// distinct, higher-scrutiny category — so all three vessel kinds stay
-// visually distinct at a glance.
-const navalColor = (kind: "military" | "tanker" | "sanctioned") =>
-  kind === "tanker" ? "#eab308" : kind === "sanctioned" ? "#dc2626" : "#7dd3fc";
-const navalIcon = (course: number | null, kind: "military" | "tanker" | "sanctioned") => {
-  const color = navalColor(kind);
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="position:relative;width:14px;height:14px;transform:rotate(${course ?? 0}deg);">
-      <div style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-50%);
-        border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:12px solid ${color};
-        filter:drop-shadow(0 0 4px ${color});"></div>
-    </div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  });
-};
-const navalIconNoHeading = (kind: "military" | "tanker" | "sanctioned") => {
-  const color = navalColor(kind);
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="width:10px;height:10px;background:${color};border:2px solid rgba(255,255,255,0.6);border-radius:2px;box-shadow:0 0 6px ${color};"></div>`,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
-  });
-};
-
-// Military base marker: small olive shield/circle, static (non-pulsing)
-// since these are fixed installations, not live-tracked assets. Major,
-// well-known installations (with curated unit/mission detail) use a brighter
-// gold marker so they visually stand out from the ~900 minor OSM entries.
-const militaryBaseIcon = new L.DivIcon({
-  className: "",
-  html: `<div style="position:relative;width:9px;height:9px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#6b7d3d;"></div>
-    <div style="position:relative;width:9px;height:9px;border-radius:50%;background:#6b7d3d;border:1.5px solid rgba(212,179,106,0.8);box-shadow:0 0 4px rgba(107,125,61,0.8);"></div>
-  </div>`,
-  iconSize: [9, 9],
-  iconAnchor: [4, 4],
+const symbolIcon = (symbol: MapSymbol) => L.divIcon({
+  className: "map-asset-symbol", html: symbol.html,
+  iconSize: [symbol.size, symbol.size], iconAnchor: symbol.anchor,
 });
-
-const majorMilitaryBaseIcon = new L.DivIcon({
-  className: "",
-  html: `<div style="position:relative;width:12px;height:12px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#1f3d1a;"></div>
-    <div style="position:relative;width:12px;height:12px;border-radius:50%;background:#1f3d1a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(31,61,26,0.9);"></div>
-  </div>`,
-  iconSize: [12, 12],
-  iconAnchor: [6, 6],
-});
-
-// Fleet-tracker group marker: distinct sky-blue diamond so approximate CSG/
-// ARG positions (from USNI's weekly report) read differently at a glance
-// from both live AIS naval dots and the olive/gold military-base markers.
-const fleetGroupIcon = new L.DivIcon({
-  className: "",
-  html: `<div style="position:relative;width:13px;height:13px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;"></div>
-    <div style="position:relative;width:13px;height:13px;transform:rotate(45deg);background:#38bdf8;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(56,189,248,0.9);"></div>
-  </div>`,
-  iconSize: [13, 13],
-  iconAnchor: [6, 6],
-});
-
-// Wildfire marker: flame-colored circle sized/opacity-scaled by Fire
-// Radiative Power (a proxy for fire intensity) so bigger fires stand out.
-const wildfireIcon = (frp: number) => {
-  const size = Math.min(18, Math.max(6, 6 + Math.sqrt(frp) / 4));
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:radial-gradient(circle,#fca5a5,#f97316 60%,#b91c1c);box-shadow:0 0 ${size / 2}px #f97316;opacity:0.85;"></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
-};
-
-// Storm marker: rotating cyclone glyph, colored by category (higher wind =
-// more red) so hurricanes stand out from tropical storms/depressions.
-const stormIcon = (classification: string) => {
-  const color = classification === "HU" ? "#ef4444" : classification === "TS" ? "#f97316" : "#facc15";
-  return new L.DivIcon({
-    className: "",
-    html: `<div style="position:relative;width:22px;height:22px;display:flex;align-items:center;justify-content:center;">
-      <div style="position:absolute;inset:0;border-radius:50%;border:2px solid ${color};opacity:0.5;"></div>
-      <div style="font-size:14px;filter:drop-shadow(0 0 3px ${color});">🌀</div>
-    </div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-};
+const navalIcon = (course: number | null, kind: "military" | "tanker" | "sanctioned") => symbolIcon(vesselSymbol({ kind, course }));
+const navalIconNoHeading = (kind: "military" | "tanker" | "sanctioned") => symbolIcon(vesselSymbol({ kind }));
+const militaryBaseIcon = symbolIcon(infrastructureSymbol({ kind: "military" }));
+const majorMilitaryBaseIcon = symbolIcon(infrastructureSymbol({ kind: "military", major: true }));
+const fleetGroupIcon = symbolIcon(vesselSymbol({ kind: "fleet" }));
+const wildfireIcon = (frp: number) => symbolIcon(fireSymbol({ magnitude: frp }));
+const stormIcon = (classification: string) => symbolIcon(stormSymbol({ classification }));
 
 // GPS/GNSS jamming marker: a real geographic-radius circle (meters, via
 // Leaflet's Circle) rather than a fixed-pixel DivIcon — an H3 res-4 cell is
@@ -228,30 +114,8 @@ const PORTS = [
   { name: "Panama", lat: 8.95, lng: -79.57 },
 ];
 
-// Port marker: small blue-tinted diamond, static like military bases (fixed
-// infrastructure, not a live-tracked asset). Curated major/strategic ports
-// (chokepoints, top container/cargo hubs) use a brighter gold marker so they
-// stand out from the hundreds of minor WPI entries, mirroring the
-// militaryBaseIcon/majorMilitaryBaseIcon distinction above.
-const portIcon = new L.DivIcon({
-  className: "",
-  html: `<div style="position:relative;width:10px;height:10px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#93c5fd;"></div>
-    <div style="position:relative;width:10px;height:10px;border-radius:50%;background:#93c5fd;border:1.5px solid rgba(255,255,255,0.8);box-shadow:0 0 6px rgba(147,197,253,0.9);"></div>
-  </div>`,
-  iconSize: [10, 10],
-  iconAnchor: [5, 5],
-});
-
-const majorPortIcon = new L.DivIcon({
-  className: "",
-  html: `<div style="position:relative;width:13px;height:13px;">
-    <div class="marker-pulse-ring" style="position:absolute;inset:0;border-radius:50%;background:#1e3a8a;"></div>
-    <div style="position:relative;width:13px;height:13px;border-radius:50%;background:#1e3a8a;border:1.5px solid rgba(255,255,255,0.85);box-shadow:0 0 8px rgba(30,58,138,0.9);"></div>
-  </div>`,
-  iconSize: [13, 13],
-  iconAnchor: [6, 6],
-});
+const portIcon = symbolIcon(infrastructureSymbol({ kind: "port" }));
+const majorPortIcon = symbolIcon(infrastructureSymbol({ kind: "port", major: true }));
 
 interface MapLayers {
   tradeRoutes: boolean;
@@ -390,7 +254,7 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
     fitToContainerWidth();
     map.on("resize", fitToContainerWidth);
     window.addEventListener("resize", fitToContainerWidth);
-    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    const observer = new ResizeObserver(() => map.invalidateSize({ animate: false, pan: true, debounceMoveend: true }));
     observer.observe(map.getContainer());
 
     return () => {
@@ -427,10 +291,10 @@ function MapFitter({ visible = true }: { visible?: boolean }) {
 // Rings grow via a per-frame JS-driven width/height (not a CSS transform:scale)
 // so the border stays a constant thin hairline — like the radar sweep line —
 // instead of visually thickening as border-width gets multiplied by scale.
-const RING_COUNT = 4;
-const RING_STAGGER_MS = 420; // significantly slower stagger between rings
+const RING_COUNT = 1;
+const RING_STAGGER_MS = 0;
 const RING_START_SIZE = 16;
-const RING_GROW_MS = 3200; // significantly slower expand/fade per ring
+const RING_GROW_MS = 700;
 
 const EventPingRings = memo(function EventPingRings({ event }: { event: Event | null }) {
   const map = useMap();
@@ -520,7 +384,7 @@ const EventPingRings = memo(function EventPingRings({ event }: { event: Event | 
         Math.hypot(pt.x, size.y - pt.y),
         Math.hypot(size.x - pt.x, size.y - pt.y)
       );
-      const maxSize = maxDist * 2.1;
+      const maxSize = Math.min(48, maxDist * 2.1);
       const stamp = Date.now();
       const now = performance.now();
       setRings(
@@ -1077,12 +941,6 @@ export default function WorldMap({
       cancelled = true;
     };
   }, [activeLayers.countries, countryFeatures.length]);
-  // Track each event marker's Leaflet instance so we can programmatically
-  // close its popup (e.g. right when "Expand" is clicked and the map begins
-  // flying/zooming into it — the popup would otherwise linger awkwardly).
-  const markerRefs = useRef(new Map<string, L.Marker>());
-  // Same purpose as markerRefs above, but for military base markers so their
-  // popup can be closed right when "Expand" triggers the fly-to/zoom.
   const baseMarkerRefs = useRef(new Map<string, L.Marker>());
   // Same purpose again, but for fleet-tracker group markers.
   const fleetMarkerRefs = useRef(new Map<string, L.Marker>());
@@ -1503,65 +1361,9 @@ export default function WorldMap({
           </Circle>
         ))}
 
-      {events.map((event) => (
-        <Marker
-          key={event.id}
-          position={[event.location.lat, event.location.lng]}
-          icon={selectedEvent?.id === event.id ? selectedIcons[event.category] || selectedIcons.general : icons[event.category] || icons.general}
-          ref={(m) => {
-            if (m) markerRefs.current.set(event.id, m);
-            else markerRefs.current.delete(event.id);
-          }}
-          eventHandlers={{
-            // Bring the clicked marker to the front of the marker pane so it's
-            // visible above every other marker layer (naval, bases, wildfires,
-            // storms) while its popup is open; reset once the popup closes.
-            // The radar sweep now renders in its own Leaflet pane (z-index
-            // 550, below the marker pane's 600), so this alone is enough to
-            // also keep the focused marker above the sweep line/labels.
-            click: (e) => e.target.setZIndexOffset(1000),
-            popupclose: (e) => e.target.setZIndexOffset(0),
-          }}
-        >
-          <Popup className="tactical-popup">
-            <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
-              <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
-                {event.category.replace(/_/g, " ")}
-              </div>
-              <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>{event.title}</div>
-              <div style={{ color: "#64748b", fontSize: "11px" }}>{event.source}</div>
-              {reportGroupCounts[event.id] > 1 && <div className="map-incident-label">{reportGroupCounts[event.id]} reports in a likely incident group</div>}
-              <button
-                onClick={() => {
-                  // Close the popup immediately — the map is about to fly/zoom
-                  // in on this marker and the side detail panel takes over as
-                  // the source of truth, so the small popup bubble would just
-                  // sit awkwardly over the marker otherwise.
-                  markerRefs.current.get(event.id)?.closePopup();
-                  onSelectEvent(event);
-                }}
-                style={{
-                  marginTop: "8px",
-                  width: "100%",
-                  border: "1px solid #3a3a3a",
-                  background: "#1e1e1e",
-                  color: "#d4b36a",
-                  borderRadius: "4px",
-                  fontSize: "10px",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  padding: "6px 8px",
-                  cursor: "pointer",
-                }}
-              >
-                Expand
-              </button>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-      {!reducedMotion && <EventPingRings event={selectedEvent} />}
+      <ReportMapMarkers events={events} selectedId={selectedEvent?.id} onSelectEvent={onSelectEvent}
+        reportGroupCounts={reportGroupCounts} reducedMotion={reducedMotion} />
+      {scanEnabled && !reducedMotion && <EventPingRings event={selectedEvent} />}
     </MapContainer>
   );
 }

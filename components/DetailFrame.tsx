@@ -1,7 +1,8 @@
 "use client";
 
-import { ReactNode, RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ReactNode, RefObject, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { ArrowLeft, X } from "lucide-react";
+import { useCompactWorkspace } from "./useCompactWorkspace";
 
 export default function DetailFrame({ title, eyebrow, onClose, children, onBack, navigation, context, depth = 1,
   viewKey, bodyRef, scrollTop = 0, focusId, closeLabel = "Close details" }: {
@@ -28,7 +29,7 @@ export default function DetailFrame({ title, eyebrow, onClose, children, onBack,
   const scrollBody = bodyRef || ownBody;
   const dismissAction = useRef(onBack || onClose);
   dismissAction.current = onBack || onClose;
-  const [compact, setCompact] = useState(false);
+  const compact = useCompactWorkspace();
   useLayoutEffect(() => {
     const element = frame.current;
     const previous = document.activeElement;
@@ -46,13 +47,6 @@ export default function DetailFrame({ title, eyebrow, onClose, children, onBack,
       });
     };
   }, []);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 767px)");
-    const update = () => setCompact(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
   useLayoutEffect(() => {
     if (scrollBody.current) scrollBody.current.scrollTop = scrollTop;
     const target = Array.from(frame.current?.querySelectorAll<HTMLElement>("[data-report-focus]") || [])
@@ -64,6 +58,7 @@ export default function DetailFrame({ title, eyebrow, onClose, children, onBack,
   useEffect(() => {
     const siblings: { element: HTMLElement; inert: boolean }[] = [];
     if (compact && frame.current) {
+      if (!frame.current.contains(document.activeElement)) heading.current?.focus({ preventScroll: true });
       let child: HTMLElement = frame.current;
       while (child.parentElement && !child.classList.contains("desk-shell")) {
         for (const sibling of Array.from(child.parentElement.children)) {

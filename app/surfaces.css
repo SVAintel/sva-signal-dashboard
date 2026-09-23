@@ -83,10 +83,3 @@
 .broadcast-options button[aria-pressed="true"] { color: var(--desk-accent); border-color: #60664f; background: #242b25; }
 .broadcast-channel { display: flex; flex-direction: column; gap: 7px; padding: 0 16px 13px; color: var(--desk-muted); font-size: 11px; }
 .broadcast-channel select { width: 100%; min-height: 39px; border: 1px solid #3c4b51; border-radius: 3px; background: #0f191e; color: var(--desk-text); font-size: 13px; padding: 7px; }
-@media (max-width: 767px) {
-  .auth-account > span { display: none; }
-  .auth-trigger { min-height: 38px; }
-  .auth-popover { position: fixed; top: 64px; right: 12px; left: 12px; width: auto; max-height: calc(100dvh - 85px); overflow-y: auto; }
-  .broadcast-heading { padding: 16px 20px; }
-  .broadcast-heading strong { font-size: 18px; }
-}

@@ -69,6 +69,35 @@ Completed conversations and drafts remain available when returning to that versi
 On phones a sheet is full-screen, traps keyboard focus and makes covered workspace
 controls inert; desktop sheets leave the ledger and map usable.
 
+### Geographic exploration and phone rotation
+
+The 2D map uses all unique, currently filtered reports. Screen-near reports share
+neutral numbered markers labelled **N nearby reports**; this is spatial
+decluttering, not incident matching or corroboration. Stable-ID sorting and fixed
+anchors make grouping independent of feed order and avoid transitive geographic
+chains. Grouping uses 46 projected pixels below zoom 6, and 24 pixels at close
+zooms to keep overlapping targets usable. It updates on settled map movement,
+zoom and resize, not on every animation frame.
+
+Hover or focus a marker for a source/time/category preview; tap does the same on
+phones. Enter moves keyboard focus into the preview. **Open report** enters the
+existing dossier. Clusters offer real-member bounds fitting, capped at zoom 8,
+and an individually browsable list even when coordinates coincide. Selected
+reports are extracted without duplicate counts; a nearby cluster badge can be
+offset with a connector to keep it accessible, never jittering report coordinates.
+Invalid coordinates are excluded; wrapped worlds and dateline bounds are handled.
+Coordinates remain supplied and may be approximate. The compact map key explains
+report, infrastructure, vessel and hazard symbols. Shared symbols retain fire
+radiative-power sizing and vessel heading; spatial clustering is 2D only.
+
+Compact layout applies to narrow viewports and short landscape coarse-pointer
+phones, using one CSS block and a shared JS query. Rotating keeps the map/panel
+choice, filters and dossier navigation; the existing map resize observer preserves
+the current center, clamping only when the legitimate minimum zoom changes.
+Visual-viewport height accommodates keyboard/browser chrome without changing
+layout mode or resizing the application during pinch zoom. Normal browser zoom
+and touch gestures remain enabled. Browser emulation is not physical-device testing.
+
 ## Data and interpretation
 
 ### Signal quality, copies and likely incidents
@@ -121,9 +150,10 @@ or switch to Individual reports. A group's headline is its newest supplied
 headline. Unique articles/reports and collected records are counted separately;
 copies and revisions are not additional witnesses. Incident chronology is also
 a dossier step, preserving Back/breadcrumb navigation when opening a member.
-Grouped maps display the newest report's coordinates, or the selected member's
+The grouped 3D globe displays the newest report's coordinates, or the selected member's
 coordinates, not an inferred incident centroid. The footer distinguishes unique
-reports from map entries. Ungrouping restores each report marker.
+reports from globe entries. Ungrouping restores each globe report marker.
+The 2D map instead exposes every scoped report through independent spatial clusters.
 
 The API retains its `Event[]` contract with optional `article` and `provenance`
 metadata; `X-SVA-Signal-Quality` reports actual excluded-item reasons and merged
@@ -243,6 +273,7 @@ npm.cmd run build
 ```bash
 npm run test:report-exploration
 npm run test:signal-quality
+npm run test:map-workspace
 npx tsc --noEmit
 ```
 

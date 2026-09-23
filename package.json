@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:report-exploration": "node --test scripts/test-report-exploration.cjs",
-    "test:signal-quality": "node --test scripts/test-signal-quality.cjs"
+    "test:signal-quality": "node --test scripts/test-signal-quality.cjs",
+    "test:map-workspace": "node --test scripts/test-map-workspace.cjs"
   },
   "dependencies": {
     "@maplibre/maplibre-gl-leaflet": "^0.1.4",

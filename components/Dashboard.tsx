@@ -28,6 +28,8 @@ import { initialReportNavigation, reportNavigationReducer } from "@/lib/report-n
 import { resolveReport } from "@/lib/report-context";
 import { groupIncidents } from "@/lib/incident-groups";
 import { scopeReports, parseSignalQuality, type SignalQuality } from "@/lib/signal-pipeline";
+import { useCompactWorkspace, useWorkspaceViewport } from "./useCompactWorkspace";
+import { uniqueMappableReports } from "@/lib/spatial-reports";
 
 const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 const GlobeMap = dynamic(() => import("./GlobeMap"), { ssr: false });
@@ -140,7 +142,8 @@ export default function Dashboard() {
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
   const [scanEnabled, setScanEnabled] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const [compactView, setCompactView] = useState(false);
+  const compactView = useCompactWorkspace();
+  useWorkspaceViewport(compactView);
   const [mapPrefsReady, setMapPrefsReady] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(360);
   const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(true);
@@ -321,16 +324,11 @@ export default function Dashboard() {
     if (scan !== null) setScanEnabled(scan === "true");
     setMapPrefsReady(true);
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const compact = window.matchMedia("(max-width: 767px)");
     const updateMotion = () => setReducedMotion(motion.matches);
-    const updateCompact = () => setCompactView(compact.matches);
     updateMotion();
-    updateCompact();
     motion.addEventListener("change", updateMotion);
-    compact.addEventListener("change", updateCompact);
     return () => {
       motion.removeEventListener("change", updateMotion);
-      compact.removeEventListener("change", updateCompact);
     };
   }, []);
   useEffect(() => {
@@ -361,6 +359,7 @@ export default function Dashboard() {
   [groupedReports, groups, selectedEvent?.id, events]);
   const reportGroupCounts = useMemo(() => Object.fromEntries(groups.flatMap(group =>
     group.reports.map(event => [event.id, group.reports.length]))), [groups]);
+  const spatialReports = useMemo(() => uniqueMappableReports(events), [events]);
   const allOn = activeCategories.length === ALL_CATEGORIES.length;
   const scopeLabel = `${allOn ? "All categories" : `${activeCategories.length} selected categories`} · ${activeTimeRangeHours === null ? "any time" : `past ${activeTimeRangeHours} hours`} · ${verification === "all" ? "all source classifications" : `${verification} sources`}${signalQuery.trim() ? ` · search: ${signalQuery.trim()}` : ""}`;
   const clearSelection = () => {
@@ -388,7 +387,8 @@ export default function Dashboard() {
     setActiveLayers((previous) => ({ ...previous, [layer]: !previous[layer] }));
   };
   const mapProps = {
-    events: mapEvents, reportGroupCounts: groupedReports ? reportGroupCounts : {}, selectedEvent, onSelectEvent: handleEventSelect, activeLayers,
+    events: mapViewMode === "2d" ? spatialReports : mapEvents, reportGroupCounts: groupedReports ? reportGroupCounts : {},
+    selectedEvent: spatialReports.find(event => event.id === selectedEvent?.id) || null, onSelectEvent: handleEventSelect, activeLayers,
     layerData: layerData && (militaryBaseFilter !== "all" || portFilter !== "all") ? {
       ...layerData,
       militaryBases: militaryBaseFilter === "all" ? layerData.militaryBases : layerData.militaryBases.filter((base) => militaryBaseFilter === "major" ? base.isMajor : !base.isMajor),
@@ -590,7 +590,7 @@ export default function Dashboard() {
             )}
           </div>
           <div className="desk-map-footer">
-            <span><strong>{events.length}</strong> reports · {mapEvents.length} map entries</span>
+            <span><strong>{events.length}</strong> reports · {mapViewMode === "2d" ? `${spatialReports.length} mapped reports` : `${mapEvents.length} map entries`}</span>
             <span>Color indicates category, not severity</span>
             <span className="desk-footer-hint">Select a marker to explore</span>
           </div>

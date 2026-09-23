@@ -109,18 +109,6 @@
 .report-chat-form button { align-self: flex-end; }
 .dossier-prompts { list-style: disc; padding-left: 20px; color: var(--desk-muted); font-size: 13px; line-height: 1.75; margin-top: 12px; }
 .dossier-prompts li + li { margin-top: 9px; }
-@media (max-width: 767px) {
-  .desk-detail-host, .desk-detail-host.has-report, .desk-detail-host.has-dossier { position: fixed; inset: 0; width: auto; z-index: 2400; }
-  .detail-frame { border: 0; border-radius: 0; }
-  .detail-frame::before { display: none; }
-  .detail-heading { padding: 15px 20px; }
-  .detail-heading h2 { font-size: 22px; max-height: 24dvh; overflow-y: auto; }
-  .detail-backline { padding-top: 3px; padding-bottom: 3px; }
-  .detail-backline button, .detail-heading .desk-icon-button { min-height: 40px; }
-  .dossier-parent-context { padding: 6px 10px; }
-  .dossier-breadcrumbs { padding-top: env(safe-area-inset-top); }
-  .detail-body { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
-}
 @media (prefers-reduced-motion: no-preference) {
   .detail-frame { animation: detail-arrive 160ms ease-out; }
   .dossier-report-link { transition: border-color 120ms ease, background 120ms ease; }

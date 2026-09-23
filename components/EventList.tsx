@@ -6,6 +6,7 @@ import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
 import { categoryMeta } from "@/lib/categories";
 import type { IncidentGroup } from "@/lib/incident-groups";
 import { reportCollections, type SignalQuality } from "@/lib/signal-pipeline";
+import { useResponsiveScrollAnchor } from "./useResponsiveScrollAnchor";
 
 const reportTime = (event: Event) => Number.isFinite(Date.parse(event.timestamp))
   ? new Date(event.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
@@ -31,6 +32,8 @@ export default function EventList({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const lastSelection = useRef<string | undefined>();
+  const rows = useRef<HTMLDivElement>(null);
+  useResponsiveScrollAnchor(rows, ".ledger-row, .ledger-incident-heading");
   useEffect(() => {
     if (lastSelection.current === selectedEvent?.id) return;
     lastSelection.current = selectedEvent?.id;
@@ -79,7 +82,7 @@ export default function EventList({
           </select></label>
         </div>
       </div>
-      <div className="ledger-rows" aria-busy={loading}>
+      <div ref={rows} className="ledger-rows" aria-busy={loading}>
         {loading && <div className="desk-empty" role="status"><span className="desk-loading-line" /><h3>Gathering the latest reports</h3><p>The map is ready to explore while sources load.</p></div>}
         {!loading && events.length === 0 && (
           <div className="desk-empty">

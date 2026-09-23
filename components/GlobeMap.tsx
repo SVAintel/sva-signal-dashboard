@@ -4,24 +4,12 @@ import Globe, { GlobeMethods } from "react-globe.gl";
 import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
+import { categoryMeta } from "@/lib/categories";
+import { fireSymbol, infrastructureSymbol, reportSymbol, stormSymbol, vesselSymbol, type MapSymbol } from "@/lib/map-symbols";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
 import type { PortDetail } from "@/lib/data/port-details";
 import type { FleetGroup } from "./FleetTrackerDetailPanel";
-
-const CATEGORY_COLORS: Record<string, string> = {
-  war: "#ef4444",
-  counter_terrorism: "#a855f7",
-  natural_disaster: "#f59e0b",
-  market: "#22d3ee",
-  biological: "#22c55e",
-  political_unrest: "#f97316",
-  cyber: "#06b6d4",
-  nuclear: "#84cc16",
-  energy: "#d97706",
-  humanitarian: "#f43f5e",
-  general: "#94a3b8",
-};
 
 const EARTH_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg";
 const EARTH_BUMP_TEXTURE = "//cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png";
@@ -193,7 +181,7 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "naval" | "wildfire" | "storm" | "gpsJam";
+  kind: "gpsJam";
   lat: number;
   lng: number;
   color: string;
@@ -207,14 +195,23 @@ interface GlobeMarker {
   lat: number;
   lng: number;
   altitude: number;
-  color: string;
-  size: number;
+  symbol: MapSymbol;
   label: string;
   kind: "event" | "militaryBase" | "fleetGroup" | "port";
   event?: Event;
   base?: MilitaryBaseFeature;
   fleetGroup?: FleetGroup;
   port?: PortFeature;
+}
+
+interface GlobeLayerMarker {
+  id: string;
+  lat: number;
+  lng: number;
+  altitude: number;
+  symbol: MapSymbol;
+  label: string;
+  kind: "naval" | "wildfire" | "storm";
 }
 
 // Popup state shared by event/military-base markers and country clicks —
@@ -440,9 +437,6 @@ const PORTS = [
 
 const intensityColor = (intensity: ConflictZoneData["intensity"]) =>
   intensity === "high" ? "#ef4444" : intensity === "medium" ? "#f59e0b" : "#84cc16";
-
-const stormColor = (classification: string) =>
-  classification === "HU" ? "#ef4444" : classification === "TS" ? "#f97316" : "#facc15";
 
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace("#", "");
@@ -903,51 +897,6 @@ export default function GlobeMap({
   const pointData = useMemo<GlobePoint[]>(() => {
     const layerPoints: GlobePoint[] = [];
 
-    if (activeLayers.navalVessels) {
-      layerPoints.push(
-        ...navalVessels.map((vessel) => ({
-          id: `naval-${vessel.mmsi}`,
-          kind: "naval" as const,
-          lat: vessel.lat,
-          lng: vessel.lng,
-          color: vessel.kind === "tanker" ? "#eab308" : vessel.kind === "sanctioned" ? "#dc2626" : "#7dd3fc",
-          radius: 0.18,
-          altitude: FLAT_ALTITUDE,
-          label: `${vessel.kind === "tanker" ? "🛢️" : vessel.kind === "sanctioned" ? "🚫" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
-        }))
-      );
-    }
-
-    if (activeLayers.wildfires) {
-      layerPoints.push(
-        ...wildfires.map((fire, index) => ({
-          id: `fire-${index}`,
-          kind: "wildfire" as const,
-          lat: fire.lat,
-          lng: fire.lng,
-          color: fire.frp > 200 ? "#f97316" : "#fca5a5",
-          radius: Math.min(0.42, Math.max(0.12, Math.sqrt(Math.max(fire.frp, 1)) / 32)),
-          altitude: FLAT_ALTITUDE,
-          label: `🔥 FRP ${fire.frp.toFixed(0)} MW — ${fire.acqDate} ${fire.confidence}% confidence`,
-        }))
-      );
-    }
-
-    if (activeLayers.storms) {
-      layerPoints.push(
-        ...storms.map((storm) => ({
-          id: `storm-${storm.id}`,
-          kind: "storm" as const,
-          lat: storm.lat,
-          lng: storm.lng,
-          color: stormColor(storm.classification),
-          radius: 0.24,
-          altitude: FLAT_ALTITUDE,
-          label: `${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${storm.pressure !== null ? `, ${storm.pressure} mb` : ""}`,
-        }))
-      );
-    }
-
     if (activeLayers.gpsJamming) {
       layerPoints.push(
         ...gpsJamHexes.map((hex) => ({
@@ -958,37 +907,23 @@ export default function GlobeMap({
           color: hex.level === "high" ? "#a855f7" : "#c4b5fd",
           radius: hex.level === "high" ? 0.3 : 0.2,
           altitude: FLAT_ALTITUDE,
-          label: `📡 GPS Jamming — ${hex.level === "high" ? "High" : "Medium"} (${hex.pct}% of ${hex.totalAircraft} aircraft affected)`,
+          label: `GPS Jamming — ${hex.level === "high" ? "High" : "Medium"} (${hex.pct}% of ${hex.totalAircraft} aircraft affected)`,
         }))
       );
     }
 
     return [...layerPoints];
-  }, [
-    activeLayers.navalVessels,
-    activeLayers.storms,
-    activeLayers.wildfires,
-    activeLayers.gpsJamming,
-    navalVessels,
-    storms,
-    wildfires,
-    gpsJamHexes,
-  ]);
+  }, [activeLayers.gpsJamming, gpsJamHexes]);
 
-  // Event markers use HTML overlays (not WebGL points) so they render as
-  // crisp, sharply-defined dots with a white border + glow + pulse ring —
-  // identical to the 2D map's marker style — instead of blending into the
-  // dark earth texture like the flat WebGL discs did. Military bases share
-  // this same HTML-overlay layer (not the WebGL pointsData layer) so they
-  // get the identical pulsing-ring treatment as events.
+  // Shared static SVG artwork keeps the two map modes' category and asset
+  // meanings aligned without changing the marker popup/selection flow.
   const eventMarkers = useMemo<GlobeMarker[]>(() => {
     const markers: GlobeMarker[] = events.map((event) => ({
       id: `event-${event.id}`,
       lat: event.location.lat,
       lng: event.location.lng,
       altitude: FLAT_ALTITUDE,
-      color: CATEGORY_COLORS[event.category] || CATEGORY_COLORS.general,
-      size: selectedEvent?.id === event.id ? 13 : 9,
+      symbol: reportSymbol({ category: event.category, selected: selectedEvent?.id === event.id }),
       label: `${event.title}\n${event.category.replace(/_/g, " ")}`,
       kind: "event",
       event,
@@ -1001,9 +936,8 @@ export default function GlobeMap({
           lat: base.lat,
           lng: base.lng,
           altitude: FLAT_ALTITUDE,
-          color: base.isMajor ? "#1f3d1a" : "#6b7d3d",
-          size: base.isMajor ? 12 : 9,
-          label: `🎯 ${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}${base.isMajor ? " ★" : ""}`,
+          symbol: infrastructureSymbol({ kind: "military", major: base.isMajor }),
+          label: `${base.name}${base.country ? ` (${base.country})` : ""}${base.operator ? ` — ${base.operator}` : ""}${base.isMajor ? " — Major base" : ""}`,
           kind: "militaryBase",
           base,
         });
@@ -1017,9 +951,8 @@ export default function GlobeMap({
           lat: group.lat,
           lng: group.lng,
           altitude: FLAT_ALTITUDE,
-          color: "#38bdf8",
-          size: 12,
-          label: `🇺🇸⚓ ${group.region}${group.groupName ? ` — ${group.groupName}` : ""}`,
+          symbol: vesselSymbol({ kind: "fleet" }),
+          label: `${group.region}${group.groupName ? ` — ${group.groupName}` : ""}`,
           kind: "fleetGroup",
           fleetGroup: group,
         });
@@ -1033,9 +966,8 @@ export default function GlobeMap({
           lat: port.lat,
           lng: port.lng,
           altitude: FLAT_ALTITUDE,
-          color: port.isMajor ? "#1e3a8a" : "#93c5fd",
-          size: port.isMajor ? 13 : 9,
-          label: `⚓ ${port.displayName}${port.country ? ` (${port.country})` : ""}${port.isMajor ? " ★" : ""}`,
+          symbol: infrastructureSymbol({ kind: "port", major: port.isMajor }),
+          label: `${port.displayName}${port.country ? ` (${port.country})` : ""}${port.isMajor ? " — Major port" : ""}`,
           kind: "port",
           port,
         });
@@ -1044,6 +976,46 @@ export default function GlobeMap({
 
     return markers;
   }, [events, selectedEvent?.id, activeLayers.militaryBases, layerData?.militaryBases, activeLayers.fleetTracker, fleetGroups, activeLayers.ports, portsToRender]);
+
+  const layerMarkers = useMemo<GlobeLayerMarker[]>(() => {
+    const markers: GlobeLayerMarker[] = [];
+    if (activeLayers.navalVessels) {
+      navalVessels.forEach((vessel) => markers.push({
+        id: `naval-${vessel.mmsi}`,
+        kind: "naval",
+        lat: vessel.lat,
+        lng: vessel.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: vesselSymbol({ kind: vessel.kind, course: vessel.course }),
+        label: `${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}`,
+      }));
+    }
+    if (activeLayers.wildfires) {
+      wildfires.forEach((fire, index) => markers.push({
+        id: `fire-${index}`,
+        kind: "wildfire",
+        lat: fire.lat,
+        lng: fire.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: fireSymbol({ magnitude: fire.frp }),
+        label: `FRP ${fire.frp.toFixed(0)} MW — ${fire.acqDate} ${fire.confidence}% confidence`,
+      }));
+    }
+    if (activeLayers.storms) {
+      storms.forEach((storm) => markers.push({
+        id: `storm-${storm.id}`,
+        kind: "storm",
+        lat: storm.lat,
+        lng: storm.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: stormSymbol({ classification: storm.classification }),
+        label: `${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${storm.pressure !== null ? `, ${storm.pressure} mb` : ""}`,
+      }));
+    }
+    return markers;
+  }, [activeLayers.navalVessels, activeLayers.wildfires, activeLayers.storms, navalVessels, wildfires, storms]);
+
+  const htmlMarkers = useMemo(() => [...layerMarkers, ...eventMarkers], [layerMarkers, eventMarkers]);
 
   // Kept in sync (below, on every render) so the proximity-click handler
   // effect can read the latest markers without needing to reattach its
@@ -1093,10 +1065,8 @@ export default function GlobeMap({
     const globe = globeRef.current;
     if (!container || !globe) return;
 
-    // The existing invisible hit-area box already reaches ~25px on-axis
-    // (more diagonally), so this needs to clearly exceed that in every
-    // direction to actually add coverage instead of just duplicating it.
-    const PROXIMITY_PX = 34;
+    // Keep nearby-marker rescue within the shared 24px symbol target.
+    const PROXIMITY_PX = 12;
 
     const findNearestMarker = (x: number, y: number): GlobeMarker | null => {
       const camera = globe.camera();
@@ -1147,7 +1117,7 @@ export default function GlobeMap({
           suppressGlobeClickCountRef.current = Math.max(0, suppressGlobeClickCountRef.current - 1);
         }, 500);
       };
-      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) {
+      if (target?.closest("[data-globe-marker]")) {
         arm();
         return;
       }
@@ -1159,9 +1129,9 @@ export default function GlobeMap({
 
     const handleCapture = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      // Clicks that already land on a marker (or its hit-area/pulse ring)
+      // Clicks that already land on a marker
       // are handled by the marker's own click listener — don't double-fire.
-      if (target?.closest(".globe-marker-tap-hit-area") || target?.closest(".marker-pulse-ring")) return;
+      if (target?.closest("[data-globe-marker]")) return;
       // Ignore clicks on the popup card itself (Expand button, etc.).
       if (target?.closest("[data-globe-popup]")) return;
 
@@ -1262,16 +1232,10 @@ export default function GlobeMap({
     layerData?.pipelines,
   ]);
 
-  // Give every event marker the same continuous small pulse ring the 2D
-  // map's ".marker-pulse-ring" CSS animation shows (fast, tight, ~2s loop),
-  // so events read as "live" on the globe too — not just the selected one.
-  // The small continuous per-event pulse now lives in the HTML marker's own
-  // CSS (`.marker-pulse-ring`, matching the 2D map exactly), so only the
-  // larger, slower focus ring for the selected event remains here (mirrors
-  // the 2D map's bigger EventPingRings focus effect).
+  // Preserve the selected-event focus effect; idle symbols remain static.
   const ringData = useMemo<RingDatum[]>(() => {
     if (!selectedEvent || reducedMotion) return [];
-    const color = CATEGORY_COLORS[selectedEvent.category] || CATEGORY_COLORS.general;
+    const color = categoryMeta[selectedEvent.category]?.color || categoryMeta.general.color;
     return [
       {
         id: `focus-${selectedEvent.id}`,
@@ -1308,28 +1272,34 @@ export default function GlobeMap({
           pointRadius="radius"
           pointLabel="label"
           pointsTransitionDuration={300}
-          htmlElementsData={eventMarkers}
+          htmlElementsData={htmlMarkers}
           htmlLat="lat"
           htmlLng="lng"
           htmlAltitude="altitude"
           htmlElement={(d) => {
-            const marker = d as GlobeMarker;
-            const size = marker.size;
-            const el = document.createElement("div");
+            const marker = d as GlobeMarker | GlobeLayerMarker;
+            const interactive = marker.kind === "event" || marker.kind === "militaryBase" || marker.kind === "fleetGroup" || marker.kind === "port";
+            const el = document.createElement(interactive ? "button" : "div");
             el.style.position = "relative";
-            el.style.width = `${size}px`;
-            el.style.height = `${size}px`;
-            el.style.cursor = "pointer";
+            el.style.width = `${marker.symbol.size}px`;
+            el.style.height = `${marker.symbol.size}px`;
+            el.style.padding = "0";
+            el.style.border = "0";
+            el.style.borderRadius = "50%";
+            el.style.background = "transparent";
+            el.style.cursor = interactive ? "pointer" : "default";
             el.style.pointerEvents = "auto";
             el.title = marker.label;
-            el.innerHTML = `
-              <div class="globe-marker-tap-hit-area"></div>
-              <div style="position:relative;width:${size}px;height:${size}px;border-radius:50%;background:${marker.color};border:1px solid #e0ded0;"></div>
-            `;
-            el.addEventListener("click", (evt) => {
-              evt.stopPropagation();
-              openMarkerPopup(marker);
-            });
+            el.setAttribute("aria-label", marker.label);
+            el.innerHTML = marker.symbol.html;
+            if (interactive) {
+              el.setAttribute("type", "button");
+              el.dataset.globeMarker = marker.id;
+              el.addEventListener("click", (evt) => {
+                evt.stopPropagation();
+                openMarkerPopup(marker as GlobeMarker);
+              });
+            }
             return el;
           }}
           htmlTransitionDuration={300}
