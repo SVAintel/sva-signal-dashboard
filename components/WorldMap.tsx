@@ -4,7 +4,7 @@ import { MapContainer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Toolti
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
-import { infrastructureSymbol, vesselSymbol, fireSymbol, stormSymbol, type MapSymbol } from "@/lib/map-symbols";
+import { infrastructureSymbol, vesselSymbol, fireSymbol, stormSymbol, flightSymbol, type MapSymbol } from "@/lib/map-symbols";
 import ReportMapMarkers from "./ReportMapMarkers";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
@@ -14,6 +14,34 @@ import type { FleetGroup } from "./FleetTrackerDetailPanel";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MapLibreTileLayer } from "./MapLibreTileLayer";
+import type { StyleSpecification } from "maplibre-gl";
+
+const DARK_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
+const DARK_ATTRIBUTION = '<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+// Esri's public World Imagery tiles need no API key and are the de-facto free satellite basemap for projects like this.
+const SATELLITE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    esriWorldImagery: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+    // Transparent overlay with country/city/road labels and boundaries, meant to sit on top of World_Imagery.
+    esriLabels: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: "esriWorldImagery", type: "raster", source: "esriWorldImagery" },
+    { id: "esriLabels", type: "raster", source: "esriLabels" },
+  ],
+};
+const SATELLITE_ATTRIBUTION = "Esri, Maxar, Earthstar Geographics, and the GIS user community";
 
 const symbolIcon = (symbol: MapSymbol) => L.divIcon({
   className: "map-asset-symbol", html: symbol.html,
@@ -26,6 +54,7 @@ const majorMilitaryBaseIcon = symbolIcon(infrastructureSymbol({ kind: "military"
 const fleetGroupIcon = symbolIcon(vesselSymbol({ kind: "fleet" }));
 const wildfireIcon = (frp: number) => symbolIcon(fireSymbol({ magnitude: frp }));
 const stormIcon = (classification: string) => symbolIcon(stormSymbol({ classification }));
+const flightIcon = (heading: number | null, verticalRate: number | null) => symbolIcon(flightSymbol({ heading, verticalRate }));
 
 // GPS/GNSS jamming marker: a real geographic-radius circle (meters, via
 // Leaflet's Circle) rather than a fixed-pixel DivIcon — an H3 res-4 cell is
@@ -130,6 +159,7 @@ interface MapLayers {
   gpsJamming: boolean;
   fleetTracker: boolean;
   countries: boolean;
+  flights: boolean;
 }
 
 interface NavalVessel {
@@ -141,6 +171,19 @@ interface NavalVessel {
   speed: number | null;
   shipType: number | null;
   kind: "military" | "tanker" | "sanctioned";
+}
+
+interface Flight {
+  icao24: string;
+  callsign: string;
+  originCountry: string;
+  lat: number;
+  lng: number;
+  altitude: number | null;
+  speed: number | null;
+  heading: number | null;
+  verticalRate: number | null;
+  squawk: string | null;
 }
 
 interface Wildfire {
@@ -875,6 +918,7 @@ export default function WorldMap({
   wildfires = [],
   storms = [],
   gpsJamHexes = [],
+  flights = [],
   onSelectConflictZone,
   selectedConflictZone = null,
   selectedMilitaryBase = null,
@@ -890,6 +934,7 @@ export default function WorldMap({
   selectedCluster = null,
   scanEnabled = true,
   reducedMotion = false,
+  satelliteView = false,
 }: {
   events: Event[];
   reportGroupCounts?: Record<string, number>;
@@ -901,6 +946,7 @@ export default function WorldMap({
   wildfires?: Wildfire[];
   storms?: Storm[];
   gpsJamHexes?: GpsJamHex[];
+  flights?: Flight[];
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
   selectedConflictZone?: ConflictZoneOutput | null;
   selectedMilitaryBase?: MilitaryBaseData | null;
@@ -916,6 +962,7 @@ export default function WorldMap({
   selectedCluster?: { id: string; lat: number; lng: number } | null;
   scanEnabled?: boolean;
   reducedMotion?: boolean;
+  satelliteView?: boolean;
 }) {
   const routesToRender = layerData?.tradeRoutes?.length ? layerData.tradeRoutes : TRADE_ROUTES;
   const zonesToRender = layerData?.conflictZones?.length ? layerData.conflictZones : [];
@@ -964,7 +1011,7 @@ export default function WorldMap({
       center={[20, 0]}
       zoom={2}
       minZoom={1}
-      maxZoom={8}
+      maxZoom={18}
       maxBounds={worldBounds}
       maxBoundsViscosity={1.0}
       style={{ height: "100%", width: "100%", background: "#0a0a0a" }}
@@ -986,8 +1033,9 @@ export default function WorldMap({
       )}
       {scanEnabled && <ScanSweep events={events} militaryBases={activeLayers.militaryBases ? layerData?.militaryBases || [] : []} />}
       <MapLibreTileLayer
-        styleUrl="https://tiles.openfreemap.org/styles/dark"
-        attribution='<a href="https://openfreemap.org/">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        key={satelliteView ? "satellite" : "dark"}
+        styleUrl={satelliteView ? SATELLITE_STYLE : DARK_STYLE_URL}
+        attribution={satelliteView ? SATELLITE_ATTRIBUTION : DARK_ATTRIBUTION}
       />
       {activeLayers.countries &&
         countryFeatures.map((feature) => {
@@ -1186,6 +1234,46 @@ export default function WorldMap({
             <Tooltip>
               {`${vessel.kind === "tanker" ? "🛢️" : vessel.kind === "sanctioned" ? "🚫" : "⚓"} ${vessel.name}${vessel.speed !== null ? ` — ${vessel.speed.toFixed(1)} kn` : ""}${vessel.kind === "sanctioned" ? " (sanctioned, RU-flagged)" : ""}`}
             </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.flights &&
+        flights.map((flight) => (
+          <Marker
+            key={flight.icao24}
+            position={[flight.lat, flight.lng]}
+            icon={flightIcon(flight.heading, flight.verticalRate)}
+            eventHandlers={{
+              click: (e) => e.target.setZIndexOffset(1000),
+              popupclose: (e) => e.target.setZIndexOffset(0),
+            }}
+          >
+            <Popup className="tactical-popup">
+              <div style={{ background: "#111111", padding: "8px 10px", borderRadius: "4px", minWidth: "180px" }}>
+                <div style={{ color: "#d4b36a", fontSize: "11px", fontWeight: "700", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "4px" }}>
+                  Aircraft
+                </div>
+                <div style={{ color: "#f1f5f9", fontSize: "13px", fontWeight: "600", marginBottom: "4px" }}>
+                  ✈️ {flight.callsign}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "11px", marginBottom: "6px" }}>
+                  {flight.originCountry || "Unknown origin"}
+                </div>
+                <div style={{ color: "#cbd5e1", fontSize: "11px", lineHeight: 1.6 }}>
+                  <div>Altitude: {flight.altitude !== null ? `${flight.altitude.toLocaleString()} ft` : "N/A"}</div>
+                  <div>Speed: {flight.speed !== null ? `${flight.speed} kn` : "N/A"}</div>
+                  <div>Heading: {flight.heading !== null ? `${Math.round(flight.heading)}°` : "N/A"}</div>
+                  <div>
+                    Vertical rate:{" "}
+                    {flight.verticalRate !== null
+                      ? `${flight.verticalRate > 0 ? "↑" : flight.verticalRate < 0 ? "↓" : "—"} ${Math.abs(flight.verticalRate).toFixed(1)} m/s`
+                      : "N/A"}
+                  </div>
+                  <div>Squawk: {flight.squawk || "N/A"}</div>
+                  <div>ICAO24: {flight.icao24 || "N/A"}</div>
+                </div>
+              </div>
+            </Popup>
           </Marker>
         ))}
 

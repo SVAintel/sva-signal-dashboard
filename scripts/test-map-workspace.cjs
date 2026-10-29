@@ -35,27 +35,37 @@ test("poll duplicate versions deterministically keep the newest snapshot", () =>
   assert.equal(clusterReports([a, b], options)[0].reports[0].title, "Updated");
   assert.deepEqual(clusterReports([a, b], options), clusterReports([b, a], options));
 });
-test("regional zoom splits nearby reports while coincident maximum-zoom points remain browsable", () => {
+test("regional zoom spreads overlapping reports apart while keeping each independently clickable", () => {
   const events = [event("a"), event("b", 10, 20.3)];
-  assert.equal(clusterReports(events, options).length, 1);
-  assert.equal(clusterReports(events, { ...options, zoom: 8 }).length, 2);
-  const same = clusterReports([event("a"), event("b"), event("c")], { ...options, zoom: 8 });
-  assert.equal(same.length, 1); assert.equal(same[0].reports.length, 3);
-  assert.deepEqual(reportBounds(same[0].reports, 20), { south: 10, north: 10, west: 20, east: 20 });
+  const near = clusterReports(events, options);
+  assert.equal(near.length, 2);
+  assert.notDeepEqual([near[0].lat, near[0].lng], [near[1].lat, near[1].lng]);
+  const far = clusterReports(events, { ...options, zoom: 8 });
+  assert.equal(far.length, 2);
+  assert.equal(far.find(point => point.reports[0].id === "a").lng, 20);
+  const coincident = clusterReports([event("a"), event("b"), event("c")], { ...options, zoom: 8 });
+  assert.equal(coincident.length, 3);
+  assert.equal(new Set(coincident.map(point => `${point.lat},${point.lng}`)).size, 3);
+  const anchor = coincident.find(point => point.reports[0].id === "a");
+  assert.equal(anchor.lat, 10); assert.equal(anchor.lng, 20);
+  assert.deepEqual(reportBounds(coincident.flatMap(point => point.reports), 20), { south: 10, north: 10, west: 20, east: 20 });
 });
 test("selected extraction never duplicates a report or invents an out-of-filter point", () => {
   const events = [event("a"), event("b"), event("c")];
   const result = clusterReports(events, { ...options, selectedId: "a" });
-  assert.equal(result.find(point => point.selected).reports[0].id, "a");
-  assert.equal(result.find(point => !point.selected).reports.length, 2);
+  assert.equal(result.length, 3);
+  const selectedPoint = result.find(point => point.selected);
+  assert.equal(selectedPoint.reports[0].id, "a");
+  assert.equal(selectedPoint.lat, 10); assert.equal(selectedPoint.lng, 20);
   assert.equal(result.flatMap(point => point.reports).length, 3);
   assert.equal(clusterReports(events, { ...options, selectedId: "missing" }).some(point => point.selected), false);
 });
-test("dateline neighbors cluster in the current wrapped world and fit narrow real bounds", () => {
+test("dateline neighbors spread independently in the wrapped world without inventing a merged point", () => {
   const events = [event("west", 5, 179.9), event("east", 5, -179.9)];
   const result = clusterReports(events, { zoom: 4, centerLongitude: 180 });
-  assert.equal(result.length, 1);
-  assert.ok(Math.abs(result[0].lng - 180) < .001);
+  assert.equal(result.length, 2);
+  for (const point of result) assert.ok(Math.abs(point.lng - 180) < 3);
+  assert.notDeepEqual([result[0].lat, result[0].lng], [result[1].lat, result[1].lng]);
   const bounds = reportBounds(events, result[0].lng);
   assert.ok(bounds.east - bounds.west < .21);
   assert.equal(longitudeNear(-179, 540), 541);

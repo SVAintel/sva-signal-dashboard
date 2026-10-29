@@ -4,9 +4,10 @@ import { createLayerComponent, LayerProps, withPane } from "@react-leaflet/core"
 import L from "leaflet";
 import "@maplibre/maplibre-gl-leaflet";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { StyleSpecification } from "maplibre-gl";
 
 export interface MapLibreTileLayerProps extends LayerProps {
-  styleUrl: string;
+  styleUrl: string | StyleSpecification;
   attribution?: string;
 }
 

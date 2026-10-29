@@ -84,6 +84,28 @@ export function vesselSymbol({
   return symbol(color, shape, selected);
 }
 
+/**
+ * True track is clockwise from north, same convention as AIS course. Color
+ * encodes vertical rate so climbing/descending/cruising traffic reads at a
+ * glance without needing to open each popup.
+ */
+export function flightSymbol({
+  heading,
+  verticalRate,
+  selected = false,
+}: {
+  heading: number | null;
+  verticalRate?: number | null;
+  selected?: boolean;
+}): MapSymbol {
+  const color = typeof verticalRate === "number" && verticalRate > 1 ? "#4ade80"
+    : typeof verticalRate === "number" && verticalRate < -1 ? "#fb923c"
+      : "#38bdf8";
+  const rotation = typeof heading === "number" && Number.isFinite(heading) ? heading : 0;
+  const shape = `<path d="M12 2.5 L14.2 12 L21 15.5 L21 17.3 L14 15 L14.6 20.3 L17 22 L17 23.3 L12 21.8 L7 23.3 L7 22 L9.4 20.3 L10 15 L3 17.3 L3 15.5 L9.8 12 Z" transform="rotate(${rotation} 12 12)" fill="${color}" stroke="${OUTLINE}" stroke-width="0.8" stroke-linejoin="round"/>`;
+  return symbol(color, shape, selected);
+}
+
 /** Fire radiative power retains the existing bounded square-root size scale. */
 export function fireSymbol({ magnitude }: { magnitude: number }): MapSymbol {
   const power = Number.isFinite(magnitude) ? Math.max(0, magnitude) : 0;

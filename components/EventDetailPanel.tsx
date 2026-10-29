@@ -202,7 +202,7 @@ export default function EventDetailPanel({ navigation, dispatch, loadedEvents, s
           <div className="dossier-report-list">{incident.reports.map(report => <div className="dossier-chronology-entry" key={report.id}>
             {reportLink(report)}<p>{report.description || "No summary supplied."}</p>
           </div>)}</div>
-          <p className="detail-disclaimer">Reported times are not necessarily incident times. Differing summaries are displayed as supplied, not adjudicated as contradictions. Use Individual reports in the ledger to remove this grouping.</p>
+          <p className="detail-disclaimer">Reported times are not necessarily incident times. Differing summaries are displayed as supplied, not adjudicated as contradictions.</p>
         </> : <div className="dossier-empty"><Network size={24} /><h3>No multi-report group in the current scope</h3><p>The other members may no longer match your filters or the latest feed. This report and its exploration path are retained; filters have not been changed.</p></div>}
       </>}
 

@@ -29,14 +29,9 @@
   .mobile-live .desk-broadcast-dock { display: block; flex: 1; max-height: none; border-top: 0; }
   .desk-map-viewport { order: 1; display: none; }
   .mobile-map .desk-map-viewport { display: block; }
-  .desk-map-footer { order: 2; display: none; gap: 13px; font-size: 10px; padding: 8px 12px; }
-  .mobile-map .desk-map-footer { display: flex; }
   .desk-popover { position: static; }
   .desk-popover-panel { top: calc(100% - 1px); left: 8px; right: 8px; width: auto; max-height: calc(var(--workspace-height, 100dvh) - 205px); }
   .desk-option { min-height: 44px; }
-  .desk-statusbar { min-height: 28px; padding: 5px 12px; font-size: 10px; }
-  .desk-statusbar-note { display: none; }
-  .desk-statusbar .desk-popover-panel { top: auto; bottom: 100%; }
   .desk-mobile-nav { display: flex; flex: none; background: #121b1f; border-top: 1px solid #3a454a; padding: 4px 0 max(4px, env(safe-area-inset-bottom)); z-index: 1600; }
   .desk-mobile-nav button { flex: 1; min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--desk-muted); font-size: 11px; }
   .desk-mobile-nav button[aria-current="page"] { color: var(--desk-accent); background: #222824; }
@@ -65,7 +60,6 @@
   @media (max-height: 500px) and (orientation: landscape) {
     .desk-masthead { min-height: 44px; }
     .desk-map-toolbar { min-height: 44px; padding-top: 2px; padding-bottom: 2px; }
-    .desk-map-footer { padding-top: 4px; padding-bottom: 4px; }
     .desk-map-tools { justify-content: center; gap: 18px; }
     .desk-mobile-nav button { min-height: 40px; flex-direction: row; gap: 8px; }
     .desk-mobile-nav button svg { width: 18px; height: 18px; }

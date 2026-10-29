@@ -2,13 +2,13 @@
 
 import { CSSProperties, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Activity, ArrowLeft, BookOpen, ChartNoAxesCombined, ChevronDown, Globe2, Layers, ListFilter, Map, MessageSquare, Network, RefreshCw, Tv, X } from "lucide-react";
+import { Activity, BookOpen, ChartNoAxesCombined, ChevronDown, Globe2, Layers, ListFilter, Map, MessageSquare, Network, RefreshCw, Search, Tv, X } from "lucide-react";
 import axios from "axios";
 import { useSession } from "next-auth/react";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
-import LiveBroadcasts, { HlsVideo, ActiveLiveChannel } from "./LiveBroadcasts";
+import LiveBroadcasts, { HlsVideo, ActiveLiveChannel, Channel } from "./LiveBroadcasts";
 import AmbientAudio from "./AmbientAudio";
 import AuthWidget from "./AuthWidget";
 import AIAnalystPanel from "./AIAnalystPanel";
@@ -27,7 +27,7 @@ import { categoryMeta } from "@/lib/categories";
 import { initialReportNavigation, reportNavigationReducer } from "@/lib/report-navigation";
 import { resolveReport } from "@/lib/report-context";
 import { groupIncidents } from "@/lib/incident-groups";
-import { scopeReports, parseSignalQuality, type SignalQuality } from "@/lib/signal-pipeline";
+import { scopeReports } from "@/lib/signal-pipeline";
 import { useCompactWorkspace, useWorkspaceViewport } from "./useCompactWorkspace";
 import { uniqueMappableReports } from "@/lib/spatial-reports";
 
@@ -35,7 +35,7 @@ const WorldMap = dynamic(() => import("./WorldMap"), { ssr: false });
 const GlobeMap = dynamic(() => import("./GlobeMap"), { ssr: false });
 
 const panels = [
-  { id: "events", label: "Signals", title: "Signal ledger", subtitle: "Reporting in geographic context", icon: Activity },
+  { id: "events", label: "Signals", title: "Report stream", subtitle: "Reporting in geographic context", icon: Activity },
   { id: "news", label: "Insights", title: "Policy & perspective", subtitle: "Research beyond the headlines", icon: BookOpen },
   { id: "stocks", label: "Markets", title: "Market watch", subtitle: "The economic context", icon: ChartNoAxesCombined },
   { id: "analyst", label: "Analyst", title: "Analyst desk", subtitle: "Interrogate the current picture", icon: MessageSquare },
@@ -57,6 +57,7 @@ const mapLayerDefs = [
   ["pipelines", "Oil & gas pipelines"],
   ["militaryBases", "Military bases"],
   ["navalVessels", "Naval & tanker vessels"],
+  ["flights", "Live aircraft"],
   ["fleetTracker", "US fleet tracker"],
   ["wildfires", "Wildfires"],
   ["storms", "Tropical storms"],
@@ -88,6 +89,11 @@ type GpsJamHex = {
   h3: string; lat: number; lng: number; level: "medium" | "high"; pct: number;
   affectedAircraft: number; totalAircraft: number;
 };
+type Flight = {
+  icao24: string; callsign: string; originCountry: string; lat: number; lng: number;
+  altitude: number | null; speed: number | null; heading: number | null;
+  verticalRate: number | null; squawk: string | null;
+};
 
 export default function Dashboard() {
   const { activeCategories, toggleCategory, setAllCategories, setDashboardActive, activeTimeRangeHours, setActiveTimeRangeHours } = useStore();
@@ -107,8 +113,7 @@ export default function Dashboard() {
   const [selectedCluster, setSelectedCluster] = useState<CorrelationCluster | null>(null);
   const [verification, setVerification] = useState<VerificationFilter>("all");
   const [signalQuery, setSignalQuery] = useState("");
-  const [groupedReports, setGroupedReports] = useState(true);
-  const [signalQuality, setSignalQuality] = useState<SignalQuality | null>(null);
+  const [groupedReports] = useState(true);
   const [militaryBaseFilter, setMilitaryBaseFilter] = useState<"all" | "major" | "minor">("major");
   const [portFilter, setPortFilter] = useState<"all" | "major" | "minor">("major");
   const [fleetRegionFilter, setFleetRegionFilter] = useState("all");
@@ -127,6 +132,8 @@ export default function Dashboard() {
   const [stormsLoading, setStormsLoading] = useState(false);
   const [gpsJamHexes, setGpsJamHexes] = useState<GpsJamHex[]>([]);
   const [gpsJamLoading, setGpsJamLoading] = useState(false);
+  const [flights, setFlights] = useState<Flight[]>([]);
+  const [flightsLoading, setFlightsLoading] = useState(false);
   const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
   const [fleetLoading, setFleetLoading] = useState(false);
   const [fleetLastChecked, setFleetLastChecked] = useState("");
@@ -138,8 +145,10 @@ export default function Dashboard() {
     tradeRoutes: false, conflictZones: false, ports: false, navalVessels: false,
     cables: false, pipelines: false, militaryBases: false, wildfires: false,
     storms: false, gpsJamming: false, fleetTracker: false, countries: true,
+    flights: false,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
+  const [satelliteView, setSatelliteView] = useState(false);
   const [scanEnabled, setScanEnabled] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
   const compactView = useCompactWorkspace();
@@ -149,6 +158,22 @@ export default function Dashboard() {
   const [liveFeedCollapsed, setLiveFeedCollapsed] = useState(true);
   const [pipChannel, setPipChannel] = useState<ActiveLiveChannel | null>(null);
   const [pipDismissed, setPipDismissed] = useState(false);
+  const [pipPos, setPipPos] = useState<{ left: number; top: number } | null>(null);
+  const [broadcastChannels, setBroadcastChannels] = useState<Channel[]>([]);
+  const [activeChannelIndex, setActiveChannelIndex] = useState(0);
+  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
+  const channelPickerRef = useRef<HTMLDivElement>(null);
+  const [pipOverride, setPipOverride] = useState<{ name: string; videoId: string } | null>(null);
+  const [pipSearchOpen, setPipSearchOpen] = useState(false);
+  const [pipSearchInput, setPipSearchInput] = useState("");
+  const [pipSearchQuery, setPipSearchQuery] = useState("");
+  const [pipSearchResults, setPipSearchResults] = useState<{ videoId: string; title: string; channelTitle: string }[]>([]);
+  const [pipSearchLoading, setPipSearchLoading] = useState(false);
+  const [pipSearchError, setPipSearchError] = useState<string | null>(null);
+  const pipSearchRef = useRef<HTMLDivElement>(null);
+  const pipRef = useRef<HTMLDivElement>(null);
+  const mapViewportRef = useRef<HTMLDivElement>(null);
+  const pipDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const [ambientPlaying, setAmbientPlaying] = useState(false);
   const [ambientVolume, setAmbientVolume] = useState(0.4);
   const dragStateRef = useRef<{ startPos: number; startSize: number } | null>(null);
@@ -212,13 +237,93 @@ export default function Dashboard() {
   };
   useEffect(() => () => handleDragEnd(), [handleDragEnd]);
 
+  const handlePipDragMove = useCallback((event: MouseEvent) => {
+    const drag = pipDragRef.current;
+    const container = mapViewportRef.current;
+    const pip = pipRef.current;
+    if (!drag || !container || !pip) return;
+    const maxLeft = container.clientWidth - pip.offsetWidth;
+    const maxTop = container.clientHeight - pip.offsetHeight;
+    setPipPos({
+      left: Math.min(Math.max(0, drag.startLeft + (event.clientX - drag.startX)), Math.max(0, maxLeft)),
+      top: Math.min(Math.max(0, drag.startTop + (event.clientY - drag.startY)), Math.max(0, maxTop)),
+    });
+  }, []);
+  const handlePipDragEnd = useCallback(() => {
+    pipDragRef.current = null;
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", handlePipDragMove);
+    window.removeEventListener("mouseup", handlePipDragEnd);
+  }, [handlePipDragMove]);
+  const startPipDrag = (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, input, form, .desk-pip-search-menu, .desk-pip-channel-menu")) return;
+    const container = mapViewportRef.current;
+    const pip = pipRef.current;
+    if (!container || !pip) return;
+    event.preventDefault();
+    const containerBounds = container.getBoundingClientRect();
+    const pipBounds = pip.getBoundingClientRect();
+    pipDragRef.current = {
+      startX: event.clientX, startY: event.clientY,
+      startLeft: pipBounds.left - containerBounds.left, startTop: pipBounds.top - containerBounds.top,
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handlePipDragMove);
+    window.addEventListener("mouseup", handlePipDragEnd);
+  };
+  useEffect(() => () => handlePipDragEnd(), [handlePipDragEnd]);
+
+  useEffect(() => {
+    if (!channelPickerOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !channelPickerRef.current?.contains(event.target)) setChannelPickerOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setChannelPickerOpen(false); };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [channelPickerOpen]);
+
+  useEffect(() => {
+    if (!pipSearchOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !pipSearchRef.current?.contains(event.target)) setPipSearchOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setPipSearchOpen(false); };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [pipSearchOpen]);
+
+  const runPipSearch = async (term: string) => {
+    if (!term.trim()) return;
+    setPipSearchQuery(term);
+    setPipSearchLoading(true);
+    setPipSearchError(null);
+    try {
+      const response = await fetch(`/api/live-streams?mode=search&q=${encodeURIComponent(term)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Broadcast search failed");
+      setPipSearchResults(data.results || []);
+      if (!data.results?.length && data.error) setPipSearchError(data.error);
+    } catch (err) {
+      setPipSearchError(err instanceof Error ? err.message : "Broadcast search failed");
+    } finally {
+      setPipSearchLoading(false);
+    }
+  };
+
   const fetchEvents = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
       const res = await axios.get("/api/events");
-      const quality = parseSignalQuality(res.headers["x-sva-signal-quality"]);
       setAllEvents(res.data);
-      setSignalQuality(quality);
       setLastUpdated(new Date().toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }));
       setLastFetchError("");
     } catch (error) {
@@ -300,6 +405,23 @@ export default function Dashboard() {
     const interval = setInterval(fetchGpsJamming, 3600000);
     return () => clearInterval(interval);
   }, [activeLayers.gpsJamming]);
+  useEffect(() => {
+    if (!activeLayers.flights) return;
+    const fetchFlights = async () => {
+      try {
+        setFlightsLoading(true);
+        const res = await axios.get("/api/flights");
+        setFlights(res.data?.flights || []);
+      } catch (error) { console.error("Failed to fetch flights:", error); }
+      finally { setFlightsLoading(false); }
+    };
+    fetchFlights();
+    // Matches the API route's own 900s (15 min) cache window — polling more
+    // often wouldn't surface newer data anyway since OpenSky's anonymous
+    // tier can't support a tighter refresh without burning its daily quota.
+    const interval = setInterval(fetchFlights, 900000);
+    return () => clearInterval(interval);
+  }, [activeLayers.flights]);
   useEffect(() => {
     if (!activeLayers.fleetTracker) return;
     const fetchFleetTracker = async () => {
@@ -398,6 +520,7 @@ export default function Dashboard() {
     wildfires: activeLayers.wildfires ? wildfires : [],
     storms: activeLayers.storms ? storms : [],
     gpsJamHexes: activeLayers.gpsJamming ? gpsJamHexes : [],
+    flights: activeLayers.flights ? flights : [],
     fleetGroups: activeLayers.fleetTracker ? fleetRegionFilter === "all" ? fleetGroups : fleetGroups.filter((group) => group.id === fleetRegionFilter) : [],
     onSelectConflictZone: (zone: ConflictZoneData) => { clearSelection(); setSelectedConflictZone(zone); },
     selectedConflictZone, selectedMilitaryBase, onSelectMilitaryBase: handleMilitaryBaseSelect,
@@ -415,6 +538,7 @@ export default function Dashboard() {
     if (key === "storms") return stormsLoading ? "Loading" : `${storms.length}`;
     if (key === "gpsJamming") return gpsJamLoading ? "Loading" : `${gpsJamHexes.length}`;
     if (key === "fleetTracker") return fleetLoading ? "Loading" : `${fleetGroups.length}`;
+    if (key === "flights") return flightsLoading ? "Loading" : `${flights.length}`;
     return "";
   };
   const panel = panels.find((item) => item.id === activeTab)!;
@@ -446,7 +570,6 @@ export default function Dashboard() {
 
       <div className={`desk-stage mobile-${mobileView}`}>
         <nav className="desk-rail" aria-label="Analysis views">
-          <div className="desk-rail-label">DESK</div>
           {panels.map(({ id, label, icon: Icon }) => (
             <button key={id} className={`desk-rail-button${activeTab === id ? " is-active" : ""}`}
               onClick={() => setActiveTab(id)} aria-label={label} aria-current={activeTab === id ? "page" : undefined}>
@@ -454,11 +577,8 @@ export default function Dashboard() {
             </button>
           ))}
           <button className={`desk-rail-button desk-rail-live${!liveFeedCollapsed ? " is-active" : ""}`}
-            onClick={() => setLiveFeedCollapsed((value) => !value)} aria-label="Toggle live broadcasts" aria-pressed={!liveFeedCollapsed}>
+            onClick={() => { setLiveFeedCollapsed((value) => !value); setPipDismissed(false); }} aria-label="Toggle live broadcasts" aria-pressed={!liveFeedCollapsed}>
             <Tv size={20} strokeWidth={1.6} /><span className="desk-rail-tooltip">Live broadcasts</span>
-          </button>
-          <button className="desk-rail-button" onClick={() => setDashboardActive(false)} aria-label="Back to introduction">
-            <ArrowLeft size={19} /><span className="desk-rail-tooltip">Introduction</span>
           </button>
         </nav>
 
@@ -480,15 +600,17 @@ export default function Dashboard() {
             <div className="desk-panel-content">
               {activeTab === "events" && <EventList events={events} loading={loading} error={lastFetchError} onSelectEvent={handleEventSelect}
                 selectedEvent={selectedEvent} verification={verification} onVerificationChange={setVerification}
-                query={signalQuery} onQueryChange={setSignalQuery} groups={groups} grouped={groupedReports} onGroupedChange={setGroupedReports} quality={signalQuality} />}
+                query={signalQuery} onQueryChange={setSignalQuery} groups={groups} grouped={groupedReports} />}
               {activeTab === "news" && <NewsPanel />}
               {activeTab === "stocks" && <StockMarketPanel />}
               {activeTab === "analyst" && <AIAnalystPanel events={events} />}
               {activeTab === "patterns" && <PatternAlertsPanel onSelectCluster={handleClusterSelect} selectedClusterId={selectedCluster?.id ?? null} />}
             </div>
           </div>
-          <div className="desk-broadcast-dock">
-            <LiveBroadcasts collapsed={liveFeedCollapsed} onToggleCollapsed={() => setLiveFeedCollapsed((value) => !value)} onActiveChannelChange={setPipChannel} />
+          <div className="desk-broadcast-dock" style={liveFeedCollapsed ? { display: "none" } : undefined}>
+            <LiveBroadcasts onActiveChannelChange={setPipChannel}
+              onChannelsChange={setBroadcastChannels} activeIndex={activeChannelIndex} onActiveIndexChange={setActiveChannelIndex}
+              onClose={() => setLiveFeedCollapsed(true)} />
           </div>
         </aside>
         <div className="desk-resizer" onMouseDown={startDrag} role="separator" aria-label="Resize analyst workspace"
@@ -510,7 +632,7 @@ export default function Dashboard() {
                   <button onClick={() => setAllCategories(ALL_CATEGORIES)}>Select all</button>
                   <button onClick={() => setAllCategories([])}>Clear</button>
                 </div>
-                <p className="desk-popover-note">Filter the map and signal ledger.</p>
+                <p className="desk-popover-note">Filter the map and report stream.</p>
                 {ALL_CATEGORIES.map((category) => (
                   <label key={category} className="desk-option">
                     <input type="checkbox" checked={activeCategories.includes(category)} onChange={() => toggleCategory(category)} />
@@ -555,6 +677,7 @@ export default function Dashboard() {
                     )}
                     {key === "navalVessels" && activeLayers.navalVessels && <p className="desk-layer-note">{navalOutage ? "AIS provider unavailable. Retrying automatically." : "Daily cached AIS scan; sparse military and tanker coverage. Red markers identify sanctioned Russia-flagged vessels (FleetLeaks)."}{navalLastChecked && ` Checked ${navalLastChecked}.`}</p>}
                     {key === "storms" && activeLayers.storms && <p className="desk-layer-note">NOAA NHC: Atlantic and Eastern/Central Pacific only, not global coverage.</p>}
+                    {key === "flights" && activeLayers.flights && <p className="desk-layer-note">OpenSky Network, anonymous tier: ~15 min refresh, capped to the 2,000 most recently reporting aircraft.</p>}
                     {key === "fleetTracker" && activeLayers.fleetTracker && <>
                       {fleetGroups.length > 0 && <label className="desk-subfilter">Region
                         <select aria-label="Fleet region" value={fleetRegionFilter} onChange={(event) => setFleetRegionFilter(event.target.value)}>
@@ -572,27 +695,72 @@ export default function Dashboard() {
                 <button aria-pressed={mapViewMode === "2d"} onClick={() => setMapViewMode("2d")}>2D</button>
                 <button aria-pressed={mapViewMode === "3d"} onClick={() => setMapViewMode("3d")} title="3D globe (pre-alpha)">3D</button>
               </div>
+              {mapViewMode === "2d" && (
+                <div className="desk-map-mode" aria-label="Base map style">
+                  <button aria-pressed={!satelliteView} onClick={() => setSatelliteView(false)}>Map</button>
+                  <button aria-pressed={satelliteView} onClick={() => setSatelliteView(true)}>Satellite</button>
+                </div>
+              )}
             </div>
           </div>
-          <div className="desk-map-viewport">
-            {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} />}
+          <div className="desk-map-viewport" ref={mapViewportRef}>
+            {mapViewMode === "3d" ? <GlobeMap {...mapProps} /> : <WorldMap {...mapProps} satelliteView={satelliteView} />}
             {mapViewMode === "3d" && <span className="desk-globe-note">3D globe · pre-alpha</span>}
             {selectedCluster && <div className="desk-cluster-selection"><Network size={15} /><span>Pattern selected</span><button className="desk-icon-button" aria-label="Clear selected pattern" onClick={() => setSelectedCluster(null)}><X size={16} /></button></div>}
-            {mobileView === "map" && pipChannel && !pipDismissed && !liveFeedCollapsed && (
-              <div className="desk-pip">
-                <div className="desk-pip-heading"><span>{pipChannel.name}</span><button aria-label="Close mini player" onClick={() => setPipDismissed(true)}><X size={15} /></button></div>
+            {pipChannel && !pipDismissed && liveFeedCollapsed && (
+              <div className="desk-pip" ref={pipRef} style={pipPos ? { left: pipPos.left, top: pipPos.top, right: "auto", bottom: "auto" } : undefined}>
+                <div className="desk-pip-heading" onMouseDown={startPipDrag}>
+                  <div className="desk-pip-channel" ref={channelPickerRef}>
+                    <button className="desk-pip-channel-trigger" onClick={() => { setChannelPickerOpen((value) => !value); setPipSearchOpen(false); }} aria-expanded={channelPickerOpen} aria-label="Choose broadcast channel">
+                      <span>{pipOverride ? pipOverride.name : pipChannel.name}</span><ChevronDown size={13} />
+                    </button>
+                    {channelPickerOpen && (
+                      <div className="desk-pip-channel-menu" role="listbox" aria-label="Broadcast channels">
+                        {broadcastChannels.map((channel, index) => (channel.videoId || channel.directEmbedUrl || channel.hlsUrl) && (
+                          <button key={channel.name} role="option" aria-selected={index === activeChannelIndex && !pipOverride}
+                            className={index === activeChannelIndex && !pipOverride ? "is-active" : ""}
+                            onClick={() => { setPipOverride(null); setActiveChannelIndex(index); setChannelPickerOpen(false); }}>
+                            {channel.name} · {channel.region}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="desk-pip-search" ref={pipSearchRef}>
+                    <button className="desk-pip-search-trigger" onClick={() => { setPipSearchOpen((value) => !value); setChannelPickerOpen(false); }} aria-expanded={pipSearchOpen} aria-label="Search YouTube broadcasts">
+                      <Search size={13} />
+                    </button>
+                    {pipSearchOpen && (
+                      <div className="desk-pip-search-menu">
+                        <form onSubmit={(event) => { event.preventDefault(); runPipSearch(pipSearchInput); }}>
+                          <input value={pipSearchInput} onChange={(event) => setPipSearchInput(event.target.value)} placeholder="Search a place or topic" aria-label="Search YouTube broadcasts" />
+                          <button type="submit" aria-label="Search" disabled={!pipSearchInput.trim() || pipSearchLoading}><Search size={13} /></button>
+                        </form>
+                        {pipSearchLoading ? <p className="desk-pip-search-status">Searching...</p>
+                          : pipSearchError ? <p className="desk-pip-search-status">{pipSearchError}</p>
+                          : pipSearchResults.length ? (
+                            <div className="desk-pip-search-results">
+                              {pipSearchResults.map((result) => (
+                                <button key={result.videoId} className={pipOverride?.videoId === result.videoId ? "is-active" : ""}
+                                  onClick={() => { setPipOverride({ name: result.title, videoId: result.videoId }); setPipSearchOpen(false); }}>
+                                  {result.title}
+                                </button>
+                              ))}
+                            </div>
+                          ) : pipSearchQuery ? <p className="desk-pip-search-status">No results for &quot;{pipSearchQuery}&quot;.</p> : null}
+                      </div>
+                    )}
+                  </div>
+                  <button aria-label="Close mini player" onClick={() => setPipDismissed(true)}><X size={15} /></button>
+                </div>
                 <div className="desk-pip-video">
-                  {pipChannel.hlsUrl ? <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
+                  {pipOverride ? <iframe key={pipOverride.videoId} src={`https://www.youtube.com/embed/${pipOverride.videoId}?autoplay=1&mute=1&controls=0&rel=0`} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipOverride.name} Live`} />
+                    : pipChannel.hlsUrl ? <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
                     : pipChannel.directEmbedUrl ? <iframe src={pipChannel.directEmbedUrl} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} />
                     : pipChannel.videoId ? <iframe src={`https://www.youtube.com/embed/${pipChannel.videoId}?autoplay=1&mute=1&controls=0&rel=0`} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} /> : null}
                 </div>
               </div>
             )}
-          </div>
-          <div className="desk-map-footer">
-            <span><strong>{events.length}</strong> reports · {mapViewMode === "2d" ? `${spatialReports.length} mapped reports` : `${mapEvents.length} map entries`}</span>
-            <span>Color indicates category, not severity</span>
-            <span className="desk-footer-hint">Select a marker to explore</span>
           </div>
         </section>
 
@@ -606,15 +774,6 @@ export default function Dashboard() {
           <ConflictZoneDetailPanel zone={selectedConflictZone} onClose={() => setSelectedConflictZone(null)} />
         </div>
       </div>
-      <footer className="desk-statusbar">
-        <span className={lastFetchError ? "desk-error-text" : ""}>{loading ? "Requesting signal feed..." : lastFetchError ? statusText : `Last successful refresh: ${lastUpdated}`}</span>
-        {staleCountryFlags.length > 0 && <WorkspacePopover label={`${staleCountryFlags.length} profile alerts`} title="Country profile alerts" icon={<Activity size={14} />}
-          open={staleCountryPanelOpen} onOpenChange={setStaleCountryPanelOpen}>
-          <p className="desk-popover-note">Recent reporting may contradict these curated profiles. Treat their details with caution until reviewed.</p>
-          {staleCountryFlags.map((flag) => <div className="desk-profile-alert" key={flag.country}><strong>{flag.country}</strong><p>{flag.issue}</p></div>)}
-        </WorkspacePopover>}
-        <span className="desk-statusbar-note">Public-source reporting / assess before acting</span>
-      </footer>
       <nav className="desk-mobile-nav" aria-label="Mobile workspace">
         {([{ id: "map", label: "Map", icon: Map }, { id: "panel", label: "Workspace", icon: Activity }, { id: "live", label: "Live", icon: Tv }] as const).map(({ id, label, icon: Icon }) => (
           <button key={id} aria-current={mobileView === id ? "page" : undefined} onClick={() => showMobileView(id)}><Icon size={20} strokeWidth={1.6} /><span>{label}</span></button>

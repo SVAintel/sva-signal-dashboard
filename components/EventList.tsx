@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronDown, Search, X } from "lucide-react";
+import { ChevronDown, Search, X } from "lucide-react";
 import { Event, VerificationFilter, isUnconfirmedSource } from "@/lib/types";
 import { categoryMeta } from "@/lib/categories";
 import type { IncidentGroup } from "@/lib/incident-groups";
-import { reportCollections, type SignalQuality } from "@/lib/signal-pipeline";
+import { reportCollections } from "@/lib/signal-pipeline";
 import { useResponsiveScrollAnchor } from "./useResponsiveScrollAnchor";
 
 const reportTime = (event: Event) => Number.isFinite(Date.parse(event.timestamp))
@@ -14,7 +14,7 @@ const reportTime = (event: Event) => Number.isFinite(Date.parse(event.timestamp)
 
 export default function EventList({
   events, loading, error, onSelectEvent, selectedEvent, verification, onVerificationChange,
-  query, onQueryChange, groups, grouped, onGroupedChange, quality,
+  query, onQueryChange, groups, grouped,
 }: {
   events: Event[];
   loading: boolean;
@@ -27,8 +27,6 @@ export default function EventList({
   onQueryChange: (value: string) => void;
   groups: IncidentGroup[];
   grouped: boolean;
-  onGroupedChange: (value: boolean) => void;
-  quality: SignalQuality | null;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const lastSelection = useRef<string | undefined>();
@@ -50,11 +48,9 @@ export default function EventList({
         <span className="ledger-index">{chronology ? "Report" : ""} {String(index + 1).padStart(2, "0")}</span></div>
       <h3>{event.title}</h3>
       {chronology && <p className="ledger-member-snippet">{event.description || "No summary supplied."}</p>}
-      <div className="ledger-source"><span>{event.source}</span><ArrowRight size={14} aria-hidden="true" /></div>
       <div className="ledger-row-bottom">
         <time dateTime={event.timestamp || undefined}>{reportTime(event)}</time>
         <span className={isUnconfirmedSource(event.source) ? "ledger-unconfirmed" : ""}>{isUnconfirmedSource(event.source) ? "Unconfirmed" : "Confirmed"}</span>
-        <span title="Report confidence">{event.confidence || "Unspecified"} confidence</span>
         {collections > 1 && <span>{collections} collection records</span>}
       </div>
     </button>;
@@ -77,9 +73,6 @@ export default function EventList({
           ))}
         </div>
         <div className="ledger-context"><span>{loading ? "Retrieving reports" : `${events.length} unique reports`}</span>
-          <label><span className="sr-only">Report arrangement</span><select aria-label="Report arrangement" value={grouped ? "grouped" : "reports"} onChange={event => onGroupedChange(event.target.value === "grouped")}>
-            <option value="grouped">Likely incidents</option><option value="reports">Individual reports</option>
-          </select></label>
         </div>
       </div>
       <div ref={rows} className="ledger-rows" aria-busy={loading}>
@@ -111,11 +104,6 @@ export default function EventList({
           </section>;
         })}
       </div>
-      <details className="ledger-note">
-        <summary>{quality ? `Feed cleanup · ${quality.excluded} omitted, ${quality.merged} merged` : "Source & grouping notes"}</summary>
-        {quality && <p>Incoming collection items omitted: {Object.entries(quality.reasons).map(([reason, count]) => `${count} ${reason}`).join(", ") || "none"}. {quality.merged} repeated collection items were consolidated before source quotas. Counts cover the fetch, not the current filters.</p>}
-        <p>Source labels do not independently verify claims. Collection records can be copies or revisions of one article, not independent witnesses. Likely incident groups use explicit named evidence; uncertain matches stay separate. Search and filters apply before groups and counts.</p>
-      </details>
     </div>
   );
 }

@@ -1,9 +1,7 @@
 import type { Event } from "./types";
 import { validCoordinates } from "./report-context";
-import { signalId } from "./signal-identity";
 
 export const REPORT_MAX_ZOOM = 8;
-export const REPORT_DETAIL_ZOOM = 6;
 export interface ReportMapPoint {
   id: string;
   reports: Event[];
@@ -39,12 +37,21 @@ export function reportBounds(events: readonly Event[], centerLongitude: number) 
   };
 }
 
+// Every unique mappable report gets its own marker; reports are never merged into a
+// count-based cluster. Reports whose screen positions would otherwise sit on top of
+// each other (identical or near-identical coordinates) are nudged apart in a small
+// deterministic spiral so each stays independently reachable by pointer, keyboard and touch.
+const OVERLAP_RADIUS = 20;
+// Marker icons render at 24px (map-symbols.ts TARGET_SIZE) — adjacent spread points
+// need at least this much center-to-center distance, plus a little slack, or their
+// clickable areas overlap and only the topmost marker in a dense group is reachable.
+const MIN_MARKER_SPACING = 28;
+
 export function clusterReports(events: readonly Event[], options: {
   zoom: number; centerLongitude: number; selectedId?: string;
 }): ReportMapPoint[] {
   const zoom = Math.max(0, Math.min(REPORT_MAX_ZOOM, Number.isFinite(options.zoom) ? options.zoom : 0));
   const scale = 256 * 2 ** zoom;
-  const radius = zoom < REPORT_DETAIL_ZOOM ? 46 : 24;
   const reference = Number.isFinite(options.centerLongitude) ? options.centerLongitude : 0;
   const points = uniqueMappableReports(events).map(event => {
     const latitude = Math.max(-85.05112878, Math.min(85.05112878, event.location.lat));
@@ -53,43 +60,50 @@ export function clusterReports(events: readonly Event[], options: {
     return { event, longitude, x: scale * (longitude + 180) / 360,
       y: scale * (0.5 - Math.log((1 + sine) / (1 - sine)) / (4 * Math.PI)) };
   });
-  type Bucket = { anchor: typeof points[number]; members: typeof points };
-  const buckets: Bucket[] = [];
-  const grid = new Map<string, Bucket[]>();
-  const result: ReportMapPoint[] = [];
+  type Point = typeof points[number];
+  const toLatLng = (x: number, y: number) => ({
+    lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / scale))) * 180 / Math.PI,
+    lng: (x / scale) * 360 - 180,
+  });
+  const groups: Point[][] = [];
+  const grid = new Map<string, Point[][]>();
   for (const point of points) {
-    if (point.event.id === options.selectedId) {
-      result.push({ id: point.event.id, reports: [point.event], lat: point.event.location.lat, lng: point.longitude, selected: true });
-      continue;
-    }
-    const cellX = Math.floor(point.x / radius), cellY = Math.floor(point.y / radius);
-    const candidates: Bucket[] = [];
+    const cellX = Math.floor(point.x / OVERLAP_RADIUS), cellY = Math.floor(point.y / OVERLAP_RADIUS);
+    const candidates: Point[][] = [];
     for (let x = cellX - 1; x <= cellX + 1; x++) {
-      for (let y = cellY - 1; y <= cellY + 1; y++) {
-        candidates.push(...(grid.get(`${x}:${y}`) || []));
-      }
+      for (let y = cellY - 1; y <= cellY + 1; y++) candidates.push(...(grid.get(`${x}:${y}`) || []));
     }
-    // Fixed anchors avoid a chain of nearby points joining distant reports.
-    const match = candidates.filter(bucket => Math.hypot(point.x - bucket.anchor.x, point.y - bucket.anchor.y) < radius)
-      .sort((a, b) => Math.hypot(point.x - a.anchor.x, point.y - a.anchor.y) -
-        Math.hypot(point.x - b.anchor.x, point.y - b.anchor.y) || compare(a.anchor.event.id, b.anchor.event.id))[0];
-    if (match) match.members.push(point);
+    // Fixed anchors avoid a chain of nearby points dragging in distant reports.
+    const match = candidates.find(group => Math.hypot(point.x - group[0].x, point.y - group[0].y) < OVERLAP_RADIUS);
+    if (match) match.push(point);
     else {
-      const bucket = { anchor: point, members: [point] };
-      buckets.push(bucket);
+      const group = [point];
+      groups.push(group);
       const key = `${cellX}:${cellY}`;
-      grid.set(key, [...(grid.get(key) || []), bucket]);
+      grid.set(key, [...(grid.get(key) || []), group]);
     }
   }
-  for (const bucket of buckets) {
-    const reports = bucket.members.map(point => point.event);
-    const meanY = bucket.members.reduce((sum, point) => sum + point.y, 0) / reports.length;
-    result.push({
-      id: reports.length === 1 ? reports[0].id : `nearby-${signalId(JSON.stringify(reports.map(event => event.id)))}`,
-      reports,
-      lat: reports.length === 1 ? reports[0].location.lat : Math.atan(Math.sinh(Math.PI * (1 - 2 * meanY / scale))) * 180 / Math.PI,
-      lng: bucket.members.reduce((sum, point) => sum + point.longitude, 0) / reports.length,
-      selected: false,
+  const result: ReportMapPoint[] = [];
+  for (const group of groups) {
+    const foundSelected = group.findIndex(point => point.event.id === options.selectedId);
+    const anchorIndex = foundSelected >= 0 ? foundSelected : 0;
+    // The anchor stays put at the center; the rest sit on a ring around it. The ring
+    // radius itself is the anchor-to-ring distance, so it must be at least
+    // MIN_MARKER_SPACING on its own; it must also grow further with group size, or
+    // tightly-packed clusters (common for a single busy country/region) squeeze
+    // adjacent ring markers closer than their own icon width apart, making the ones
+    // underneath unreachable by click/tap. Required chord length between adjacent
+    // ring slots is 2 * r * sin(pi / n); solve for r and take the larger constraint.
+    const spread = Math.max(MIN_MARKER_SPACING, MIN_MARKER_SPACING / (2 * Math.sin(Math.PI / group.length)));
+    group.forEach((point, index) => {
+      const selected = point.event.id === options.selectedId;
+      if (group.length === 1 || index === anchorIndex) {
+        result.push({ id: point.event.id, reports: [point.event], lat: point.event.location.lat, lng: point.longitude, selected });
+        return;
+      }
+      const angle = (2 * Math.PI * index) / group.length;
+      const { lat, lng } = toLatLng(point.x + Math.cos(angle) * spread, point.y + Math.sin(angle) * spread);
+      result.push({ id: point.event.id, reports: [point.event], lat, lng, selected });
     });
   }
   return result.sort((a, b) => compare(a.id, b.id));

@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { categoryMeta } from "@/lib/categories";
-import { fireSymbol, infrastructureSymbol, reportSymbol, stormSymbol, vesselSymbol, type MapSymbol } from "@/lib/map-symbols";
+import { fireSymbol, infrastructureSymbol, reportSymbol, stormSymbol, vesselSymbol, flightSymbol, type MapSymbol } from "@/lib/map-symbols";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
 import type { PortDetail } from "@/lib/data/port-details";
@@ -35,6 +35,7 @@ interface MapLayers {
   gpsJamming: boolean;
   fleetTracker: boolean;
   countries: boolean;
+  flights: boolean;
 }
 
 interface GeoJsonFeature {
@@ -98,6 +99,19 @@ interface NavalVessel {
   speed: number | null;
   shipType: number | null;
   kind: "military" | "tanker" | "sanctioned";
+}
+
+interface Flight {
+  icao24: string;
+  callsign: string;
+  originCountry: string;
+  lat: number;
+  lng: number;
+  altitude: number | null;
+  speed: number | null;
+  heading: number | null;
+  verticalRate: number | null;
+  squawk: string | null;
 }
 
 interface Wildfire {
@@ -211,7 +225,7 @@ interface GlobeLayerMarker {
   altitude: number;
   symbol: MapSymbol;
   label: string;
-  kind: "naval" | "wildfire" | "storm";
+  kind: "naval" | "wildfire" | "storm" | "flight";
 }
 
 // Popup state shared by event/military-base markers and country clicks —
@@ -465,6 +479,7 @@ export default function GlobeMap({
   wildfires = [],
   storms = [],
   gpsJamHexes = [],
+  flights = [],
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
@@ -489,6 +504,7 @@ export default function GlobeMap({
   wildfires?: Wildfire[];
   storms?: Storm[];
   gpsJamHexes?: GpsJamHex[];
+  flights?: Flight[];
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
   selectedMilitaryBase?: MilitaryBaseFeature | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
@@ -1012,8 +1028,19 @@ export default function GlobeMap({
         label: `${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${storm.pressure !== null ? `, ${storm.pressure} mb` : ""}`,
       }));
     }
+    if (activeLayers.flights) {
+      flights.forEach((flight) => markers.push({
+        id: `flight-${flight.icao24}`,
+        kind: "flight",
+        lat: flight.lat,
+        lng: flight.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: flightSymbol({ heading: flight.heading, verticalRate: flight.verticalRate }),
+        label: `✈️ ${flight.callsign}${flight.altitude !== null ? ` — ${flight.altitude.toLocaleString()} ft` : ""}${flight.speed !== null ? `, ${flight.speed} kn` : ""}`,
+      }));
+    }
     return markers;
-  }, [activeLayers.navalVessels, activeLayers.wildfires, activeLayers.storms, navalVessels, wildfires, storms]);
+  }, [activeLayers.navalVessels, activeLayers.wildfires, activeLayers.storms, activeLayers.flights, navalVessels, wildfires, storms, flights]);
 
   const htmlMarkers = useMemo(() => [...layerMarkers, ...eventMarkers], [layerMarkers, eventMarkers]);
 
