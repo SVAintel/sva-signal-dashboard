@@ -1,18 +1,59 @@
 import { NextResponse } from "next/server";
 
 // OpenSky Network's anonymous REST API provides free, global, near-real-time
-// ADS-B aircraft positions with no API key required. Anonymous usage is
-// capped at 400 credits/day and a global (no bounding box) /states/all query
-// costs 4 credits per call (per OpenSky's published cost table), so a 15-min
-// cache window keeps this comfortably under budget (~96 calls/day) while
-// still feeling live. Unlike the naval layer (90s AIS WebSocket collection
-// window), this is a single fast REST GET, so Next's fetch-level cache
-// handles freshness on its own — no background timer/cron needed.
+// ADS-B aircraft positions with no API key required. However, OpenSky blocks
+// (or silently empties) anonymous requests coming from cloud/datacenter IP
+// ranges (Vercel, AWS, GCP, etc.) to curb abuse -- it's calibrated for
+// residential IPs, so this worked from a home machine but returned empty
+// states once deployed. Authenticating via OAuth2 client-credentials (a free
+// OpenSky account) raises the quota and avoids that anonymous-tier IP
+// blocking; anonymous access remains as a fallback if no credentials are
+// configured. Each /states/all call costs 1 credit against a 4,000/day
+// authenticated budget, so a 2-min cache window (max 720 calls/day, ~18% of
+// budget) keeps data fresh with plenty of headroom. Unlike the naval layer
+// (90s AIS WebSocket collection window), this is a single fast REST GET, so
+// Next's fetch-level cache handles freshness on its own — no background
+// timer/cron needed.
 const OPENSKY_URL = "https://opensky-network.org/api/states/all";
-const CACHE_SECONDS = 900;
+const OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token";
+const CACHE_SECONDS = 120;
 
 export const dynamic = "force-dynamic";
 export const revalidate = CACHE_SECONDS;
+
+// Cached in the function's module scope so a warm serverless instance reuses
+// the token across requests instead of re-authenticating every call.
+let cachedToken: { value: string; expiresAt: number } | null = null;
+
+async function getOpenSkyAccessToken(): Promise<string | null> {
+  const clientId = process.env.OPENSKY_CLIENT_ID;
+  const clientSecret = process.env.OPENSKY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
+  try {
+    const res = await fetch(OPENSKY_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.error("OpenSky token request failed:", res.status);
+      return null;
+    }
+    const data = await res.json();
+    const token = typeof data?.access_token === "string" ? data.access_token : null;
+    const expiresInSec = Number(data?.expires_in);
+    if (!token) return null;
+    // Refresh a little early (30s margin) so we never use a token right as it expires.
+    const ttlMs = (Number.isFinite(expiresInSec) && expiresInSec > 30 ? expiresInSec - 30 : 270) * 1000;
+    cachedToken = { value: token, expiresAt: Date.now() + ttlMs };
+    return token;
+  } catch (error) {
+    console.error("OpenSky token fetch error:", error);
+    return null;
+  }
+}
 
 interface Flight {
   icao24: string;
@@ -35,7 +76,11 @@ const MAX_FLIGHTS = 2000;
 
 export async function GET() {
   try {
-    const res = await fetch(OPENSKY_URL, { next: { revalidate: CACHE_SECONDS } });
+    const token = await getOpenSkyAccessToken();
+    const res = await fetch(OPENSKY_URL, {
+      next: { revalidate: CACHE_SECONDS },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     if (!res.ok) {
       return NextResponse.json({ flights: [], note: `OpenSky fetch failed: ${res.status}` });
     }

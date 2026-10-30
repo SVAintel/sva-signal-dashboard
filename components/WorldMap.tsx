@@ -4,7 +4,7 @@ import { MapContainer, Marker, Popup, Polyline, Polygon, Circle, GeoJSON, Toolti
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Event } from "@/lib/types";
-import { infrastructureSymbol, vesselSymbol, fireSymbol, stormSymbol, flightSymbol, type MapSymbol } from "@/lib/map-symbols";
+import { infrastructureSymbol, vesselSymbol, fireSymbol, stormSymbol, flightSymbol, cyberThreatSymbol, volcanoSymbol, type MapSymbol } from "@/lib/map-symbols";
 import ReportMapMarkers from "./ReportMapMarkers";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseData } from "./MilitaryBaseDetailPanel";
@@ -55,6 +55,8 @@ const fleetGroupIcon = symbolIcon(vesselSymbol({ kind: "fleet" }));
 const wildfireIcon = (frp: number) => symbolIcon(fireSymbol({ magnitude: frp }));
 const stormIcon = (classification: string) => symbolIcon(stormSymbol({ classification }));
 const flightIcon = (heading: number | null, verticalRate: number | null) => symbolIcon(flightSymbol({ heading, verticalRate }));
+const cyberThreatIcon = (attacks: number) => symbolIcon(cyberThreatSymbol({ attacks }));
+const volcanoIcon = (lastEruptionYear: number | null) => symbolIcon(volcanoSymbol({ lastEruptionYear }));
 
 // GPS/GNSS jamming marker: a real geographic-radius circle (meters, via
 // Leaflet's Circle) rather than a fixed-pixel DivIcon — an H3 res-4 cell is
@@ -74,6 +76,49 @@ const gpsJamStyle = (level: "medium" | "high") => {
     fillOpacity: level === "high" ? 0.55 : 0.35,
   };
 };
+
+// Country-level outage: same true-scale treatment as GPS jamming — a single
+// hue shaded darker/larger-opacity for the more severe level — but drawn as
+// an actual hexagon (not a circle) and radius comes from the country's own
+// area (precomputed server-side) instead of a fixed per-level size, so the
+// patch reads as "about this country" at any zoom rather than a fixed-pixel
+// pin.
+const countryOutageStyle = (level: "warning" | "critical") => {
+  const color = level === "critical" ? "#7f1d1d" : "#f87171";
+  return {
+    color,
+    weight: 1,
+    fillColor: color,
+    fillOpacity: level === "critical" ? 0.55 : 0.3,
+  };
+};
+
+// Geodesic destination point (spherical law of cosines) — used to build a
+// true hexagon ring around a center point rather than naively offsetting by
+// degrees, which would distort badly at high latitudes.
+function destinationPoint(lat: number, lng: number, bearingDeg: number, distanceMeters: number): [number, number] {
+  const R = 6371000;
+  const bearing = (bearingDeg * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const angularDistance = distanceMeters / R;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance) + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing)
+  );
+  const lng2 =
+    lng1 +
+    Math.atan2(
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
+      Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+    );
+  return [(lat2 * 180) / Math.PI, (((lng2 * 180) / Math.PI + 540) % 360) - 180];
+}
+
+function hexagonPoints(lat: number, lng: number, radiusMeters: number): [number, number][] {
+  const points: [number, number][] = [];
+  for (let i = 0; i < 6; i++) points.push(destinationPoint(lat, lng, i * 60, radiusMeters));
+  return points;
+}
 
 const worldBounds = L.latLngBounds(L.latLng(-85.06, -180), L.latLng(85.06, 180));
 
@@ -160,6 +205,9 @@ interface MapLayers {
   fleetTracker: boolean;
   countries: boolean;
   flights: boolean;
+  internetOutages: boolean;
+  cyberThreats: boolean;
+  volcanoes: boolean;
 }
 
 interface NavalVessel {
@@ -219,6 +267,41 @@ interface GpsJamHex {
   pct: number;
   affectedAircraft: number;
   totalAircraft: number;
+}
+
+interface CountryOutage {
+  code: string;
+  name: string;
+  lat: number;
+  lng: number;
+  level: "warning" | "critical";
+  datasource: string;
+  time: number;
+  radiusMeters: number;
+}
+
+interface CyberThreat {
+  ip: string;
+  lat: number;
+  lng: number;
+  country: string | null;
+  attacks: number;
+  reports: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+interface Volcano {
+  id: number;
+  name: string;
+  type: string | null;
+  country: string | null;
+  region: string | null;
+  lat: number;
+  lng: number;
+  elevation: number | null;
+  lastEruptionYear: number | null;
+  summary: string | null;
 }
 
 interface ConflictZoneOutput extends ConflictZoneData {}
@@ -919,6 +1002,9 @@ export default function WorldMap({
   storms = [],
   gpsJamHexes = [],
   flights = [],
+  internetOutages = [],
+  cyberThreats = [],
+  volcanoes = [],
   onSelectConflictZone,
   selectedConflictZone = null,
   selectedMilitaryBase = null,
@@ -947,6 +1033,9 @@ export default function WorldMap({
   storms?: Storm[];
   gpsJamHexes?: GpsJamHex[];
   flights?: Flight[];
+  internetOutages?: CountryOutage[];
+  cyberThreats?: CyberThreat[];
+  volcanoes?: Volcano[];
   onSelectConflictZone?: (zone: ConflictZoneOutput) => void;
   selectedConflictZone?: ConflictZoneOutput | null;
   selectedMilitaryBase?: MilitaryBaseData | null;
@@ -1430,6 +1519,39 @@ export default function WorldMap({
             <Tooltip>
               {`${storm.name}${storm.intensity !== null ? ` — ${storm.intensity} kn` : ""}${
                 storm.pressure !== null ? `, ${storm.pressure} mb` : ""
+              }`}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.internetOutages &&
+        internetOutages.map((outage) => (
+          <Polygon
+            key={`outage-${outage.code}`}
+            positions={hexagonPoints(outage.lat, outage.lng, outage.radiusMeters)}
+            pathOptions={countryOutageStyle(outage.level)}
+          >
+            <Tooltip>
+              {`📶 ${outage.name} — ${outage.level === "critical" ? "Critical" : "Warning"} connectivity drop (${outage.datasource})`}
+            </Tooltip>
+          </Polygon>
+        ))}
+
+      {activeLayers.cyberThreats &&
+        cyberThreats.map((threat) => (
+          <Marker key={`cyber-${threat.ip}`} position={[threat.lat, threat.lng]} icon={cyberThreatIcon(threat.attacks)}>
+            <Tooltip>
+              {`🛡️ ${threat.ip}${threat.country ? ` (${threat.country})` : ""} — ${threat.attacks} reported attacks`}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {activeLayers.volcanoes &&
+        volcanoes.map((volcano) => (
+          <Marker key={`volcano-${volcano.id}`} position={[volcano.lat, volcano.lng]} icon={volcanoIcon(volcano.lastEruptionYear)}>
+            <Tooltip>
+              {`🌋 ${volcano.name}${volcano.country ? ` (${volcano.country})` : ""}${
+                volcano.lastEruptionYear !== null ? ` — last erupted ${volcano.lastEruptionYear}` : ""
               }`}
             </Tooltip>
           </Marker>

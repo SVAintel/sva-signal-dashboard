@@ -46,12 +46,22 @@ const OVERLAP_RADIUS = 20;
 // need at least this much center-to-center distance, plus a little slack, or their
 // clickable areas overlap and only the topmost marker in a dense group is reachable.
 const MIN_MARKER_SPACING = 28;
+// A fixed on-screen spacing covers a much larger real-world distance when zoomed out (few
+// screen pixels span huge stretches of ground), so grouped reports used to get nudged many
+// degrees away from their true coordinates while the map was zoomed out. Ramping the spacing
+// down at low zoom keeps that drift small; it reaches the full click-friendly spacing once
+// zoomed in to SPACING_FULL_ZOOM, where the smaller real-world distance per pixel matters more
+// than the trimmed screen spacing.
+const SPACING_FULL_ZOOM = 4;
+const MIN_MARKER_SPACING_AT_ZOOM_0 = 4;
 
 export function clusterReports(events: readonly Event[], options: {
   zoom: number; centerLongitude: number; selectedId?: string;
 }): ReportMapPoint[] {
   const zoom = Math.max(0, Math.min(REPORT_MAX_ZOOM, Number.isFinite(options.zoom) ? options.zoom : 0));
   const scale = 256 * 2 ** zoom;
+  const minMarkerSpacing = zoom >= SPACING_FULL_ZOOM ? MIN_MARKER_SPACING
+    : MIN_MARKER_SPACING_AT_ZOOM_0 + (MIN_MARKER_SPACING - MIN_MARKER_SPACING_AT_ZOOM_0) * (zoom / SPACING_FULL_ZOOM);
   const reference = Number.isFinite(options.centerLongitude) ? options.centerLongitude : 0;
   const points = uniqueMappableReports(events).map(event => {
     const latitude = Math.max(-85.05112878, Math.min(85.05112878, event.location.lat));
@@ -89,12 +99,12 @@ export function clusterReports(events: readonly Event[], options: {
     const anchorIndex = foundSelected >= 0 ? foundSelected : 0;
     // The anchor stays put at the center; the rest sit on a ring around it. The ring
     // radius itself is the anchor-to-ring distance, so it must be at least
-    // MIN_MARKER_SPACING on its own; it must also grow further with group size, or
+    // minMarkerSpacing on its own; it must also grow further with group size, or
     // tightly-packed clusters (common for a single busy country/region) squeeze
     // adjacent ring markers closer than their own icon width apart, making the ones
     // underneath unreachable by click/tap. Required chord length between adjacent
     // ring slots is 2 * r * sin(pi / n); solve for r and take the larger constraint.
-    const spread = Math.max(MIN_MARKER_SPACING, MIN_MARKER_SPACING / (2 * Math.sin(Math.PI / group.length)));
+    const spread = Math.max(minMarkerSpacing, minMarkerSpacing / (2 * Math.sin(Math.PI / group.length)));
     group.forEach((point, index) => {
       const selected = point.event.id === options.selectedId;
       if (group.length === 1 || index === anchorIndex) {

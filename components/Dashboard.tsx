@@ -8,7 +8,7 @@ import { useSession } from "next-auth/react";
 import EventList from "./EventList";
 import NewsPanel from "./NewsPanel";
 import StockMarketPanel from "./StockMarketPanel";
-import LiveBroadcasts, { HlsVideo, ActiveLiveChannel, Channel } from "./LiveBroadcasts";
+import LiveBroadcasts, { ActiveLiveChannel, Channel } from "./LiveBroadcasts";
 import AmbientAudio from "./AmbientAudio";
 import AuthWidget from "./AuthWidget";
 import AIAnalystPanel from "./AIAnalystPanel";
@@ -62,6 +62,9 @@ const mapLayerDefs = [
   ["wildfires", "Wildfires"],
   ["storms", "Tropical storms"],
   ["gpsJamming", "GPS interference"],
+  ["internetOutages", "Internet outages"],
+  ["cyberThreats", "Cyber threats"],
+  ["volcanoes", "Volcanic activity"],
 ] as const;
 type MapLayerKey = typeof mapLayerDefs[number][0];
 type MapLayerData = {
@@ -93,6 +96,18 @@ type Flight = {
   icao24: string; callsign: string; originCountry: string; lat: number; lng: number;
   altitude: number | null; speed: number | null; heading: number | null;
   verticalRate: number | null; squawk: string | null;
+};
+type CountryOutage = {
+  code: string; name: string; lat: number; lng: number; level: "warning" | "critical";
+  datasource: string; time: number; radiusMeters: number;
+};
+type CyberThreat = {
+  ip: string; lat: number; lng: number; country: string | null; attacks: number;
+  reports: number; firstSeen: string | null; lastSeen: string | null;
+};
+type Volcano = {
+  id: number; name: string; type: string | null; country: string | null; region: string | null;
+  lat: number; lng: number; elevation: number | null; lastEruptionYear: number | null; summary: string | null;
 };
 
 export default function Dashboard() {
@@ -134,6 +149,12 @@ export default function Dashboard() {
   const [gpsJamLoading, setGpsJamLoading] = useState(false);
   const [flights, setFlights] = useState<Flight[]>([]);
   const [flightsLoading, setFlightsLoading] = useState(false);
+  const [internetOutages, setInternetOutages] = useState<CountryOutage[]>([]);
+  const [internetOutagesLoading, setInternetOutagesLoading] = useState(false);
+  const [cyberThreats, setCyberThreats] = useState<CyberThreat[]>([]);
+  const [cyberThreatsLoading, setCyberThreatsLoading] = useState(false);
+  const [volcanoes, setVolcanoes] = useState<Volcano[]>([]);
+  const [volcanoesLoading, setVolcanoesLoading] = useState(false);
   const [fleetGroups, setFleetGroups] = useState<FleetGroup[]>([]);
   const [fleetLoading, setFleetLoading] = useState(false);
   const [fleetLastChecked, setFleetLastChecked] = useState("");
@@ -145,7 +166,7 @@ export default function Dashboard() {
     tradeRoutes: false, conflictZones: false, ports: false, navalVessels: false,
     cables: false, pipelines: false, militaryBases: false, wildfires: false,
     storms: false, gpsJamming: false, fleetTracker: false, countries: true,
-    flights: false,
+    flights: false, internetOutages: false, cyberThreats: false, volcanoes: false,
   });
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("2d");
   const [satelliteView, setSatelliteView] = useState(false);
@@ -163,7 +184,7 @@ export default function Dashboard() {
   const [activeChannelIndex, setActiveChannelIndex] = useState(0);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const channelPickerRef = useRef<HTMLDivElement>(null);
-  const [pipOverride, setPipOverride] = useState<{ name: string; videoId: string } | null>(null);
+  const [pipOverride, setPipOverride] = useState<{ title: string; videoId: string } | null>(null);
   const [pipSearchOpen, setPipSearchOpen] = useState(false);
   const [pipSearchInput, setPipSearchInput] = useState("");
   const [pipSearchQuery, setPipSearchQuery] = useState("");
@@ -172,6 +193,7 @@ export default function Dashboard() {
   const [pipSearchError, setPipSearchError] = useState<string | null>(null);
   const pipSearchRef = useRef<HTMLDivElement>(null);
   const pipRef = useRef<HTMLDivElement>(null);
+  const [pipVideoHost, setPipVideoHost] = useState<HTMLDivElement | null>(null);
   const mapViewportRef = useRef<HTMLDivElement>(null);
   const pipDragRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
   const [ambientPlaying, setAmbientPlaying] = useState(false);
@@ -416,12 +438,53 @@ export default function Dashboard() {
       finally { setFlightsLoading(false); }
     };
     fetchFlights();
-    // Matches the API route's own 900s (15 min) cache window — polling more
-    // often wouldn't surface newer data anyway since OpenSky's anonymous
-    // tier can't support a tighter refresh without burning its daily quota.
-    const interval = setInterval(fetchFlights, 900000);
+    // Slightly looser than the API route's own 120s cache window so polling
+    // reliably lands after a fresh server-side refresh, not right before one.
+    const interval = setInterval(fetchFlights, 150000);
     return () => clearInterval(interval);
   }, [activeLayers.flights]);
+  useEffect(() => {
+    if (!activeLayers.internetOutages) return;
+    const fetchInternetOutages = async () => {
+      try {
+        setInternetOutagesLoading(true);
+        const res = await axios.get("/api/internet-outages");
+        setInternetOutages(res.data?.outages || []);
+      } catch (error) { console.error("Failed to fetch internet outages:", error); }
+      finally { setInternetOutagesLoading(false); }
+    };
+    fetchInternetOutages();
+    const interval = setInterval(fetchInternetOutages, 900000);
+    return () => clearInterval(interval);
+  }, [activeLayers.internetOutages]);
+  useEffect(() => {
+    if (!activeLayers.cyberThreats) return;
+    const fetchCyberThreats = async () => {
+      try {
+        setCyberThreatsLoading(true);
+        const res = await axios.get("/api/cyber-threats");
+        setCyberThreats(res.data?.threats || []);
+      } catch (error) { console.error("Failed to fetch cyber threats:", error); }
+      finally { setCyberThreatsLoading(false); }
+    };
+    fetchCyberThreats();
+    const interval = setInterval(fetchCyberThreats, 1800000);
+    return () => clearInterval(interval);
+  }, [activeLayers.cyberThreats]);
+  useEffect(() => {
+    if (!activeLayers.volcanoes) return;
+    const fetchVolcanoes = async () => {
+      try {
+        setVolcanoesLoading(true);
+        const res = await axios.get("/api/volcanoes");
+        setVolcanoes(res.data?.volcanoes || []);
+      } catch (error) { console.error("Failed to fetch volcanoes:", error); }
+      finally { setVolcanoesLoading(false); }
+    };
+    fetchVolcanoes();
+    const interval = setInterval(fetchVolcanoes, 3600000);
+    return () => clearInterval(interval);
+  }, [activeLayers.volcanoes]);
   useEffect(() => {
     if (!activeLayers.fleetTracker) return;
     const fetchFleetTracker = async () => {
@@ -521,6 +584,9 @@ export default function Dashboard() {
     storms: activeLayers.storms ? storms : [],
     gpsJamHexes: activeLayers.gpsJamming ? gpsJamHexes : [],
     flights: activeLayers.flights ? flights : [],
+    internetOutages: activeLayers.internetOutages ? internetOutages : [],
+    cyberThreats: activeLayers.cyberThreats ? cyberThreats : [],
+    volcanoes: activeLayers.volcanoes ? volcanoes : [],
     fleetGroups: activeLayers.fleetTracker ? fleetRegionFilter === "all" ? fleetGroups : fleetGroups.filter((group) => group.id === fleetRegionFilter) : [],
     onSelectConflictZone: (zone: ConflictZoneData) => { clearSelection(); setSelectedConflictZone(zone); },
     selectedConflictZone, selectedMilitaryBase, onSelectMilitaryBase: handleMilitaryBaseSelect,
@@ -539,6 +605,9 @@ export default function Dashboard() {
     if (key === "gpsJamming") return gpsJamLoading ? "Loading" : `${gpsJamHexes.length}`;
     if (key === "fleetTracker") return fleetLoading ? "Loading" : `${fleetGroups.length}`;
     if (key === "flights") return flightsLoading ? "Loading" : `${flights.length}`;
+    if (key === "internetOutages") return internetOutagesLoading ? "Loading" : `${internetOutages.length}`;
+    if (key === "cyberThreats") return cyberThreatsLoading ? "Loading" : `${cyberThreats.length}`;
+    if (key === "volcanoes") return volcanoesLoading ? "Loading" : `${volcanoes.length}`;
     return "";
   };
   const panel = panels.find((item) => item.id === activeTab)!;
@@ -610,6 +679,9 @@ export default function Dashboard() {
           <div className="desk-broadcast-dock" style={liveFeedCollapsed ? { display: "none" } : undefined}>
             <LiveBroadcasts onActiveChannelChange={setPipChannel}
               onChannelsChange={setBroadcastChannels} activeIndex={activeChannelIndex} onActiveIndexChange={setActiveChannelIndex}
+              overrideChannel={pipOverride} onOverrideChange={setPipOverride}
+              videoHost={liveFeedCollapsed && pipChannel && !pipDismissed ? pipVideoHost : null}
+              stopped={liveFeedCollapsed && pipDismissed}
               onClose={() => setLiveFeedCollapsed(true)} />
           </div>
         </aside>
@@ -677,7 +749,10 @@ export default function Dashboard() {
                     )}
                     {key === "navalVessels" && activeLayers.navalVessels && <p className="desk-layer-note">{navalOutage ? "AIS provider unavailable. Retrying automatically." : "Daily cached AIS scan; sparse military and tanker coverage. Red markers identify sanctioned Russia-flagged vessels (FleetLeaks)."}{navalLastChecked && ` Checked ${navalLastChecked}.`}</p>}
                     {key === "storms" && activeLayers.storms && <p className="desk-layer-note">NOAA NHC: Atlantic and Eastern/Central Pacific only, not global coverage.</p>}
-                    {key === "flights" && activeLayers.flights && <p className="desk-layer-note">OpenSky Network, anonymous tier: ~15 min refresh, capped to the 2,000 most recently reporting aircraft.</p>}
+                    {key === "flights" && activeLayers.flights && <p className="desk-layer-note">OpenSky Network: ~2 min refresh, capped to the 2,000 most recently reporting aircraft.</p>}
+                    {key === "internetOutages" && activeLayers.internetOutages && <p className="desk-layer-note">IODA (Georgia Tech): country-level connectivity drops vs. historical baseline, last 24h, 15 min refresh.</p>}
+                    {key === "cyberThreats" && activeLayers.cyberThreats && <p className="desk-layer-note">SANS ISC/DShield: top reported attacking source IPs, geolocated by IP, 30 min refresh.</p>}
+                    {key === "volcanoes" && activeLayers.volcanoes && <p className="desk-layer-note">Smithsonian GVP: volcanoes with eruptive activity in the last two years, hourly refresh.</p>}
                     {key === "fleetTracker" && activeLayers.fleetTracker && <>
                       {fleetGroups.length > 0 && <label className="desk-subfilter">Region
                         <select aria-label="Fleet region" value={fleetRegionFilter} onChange={(event) => setFleetRegionFilter(event.target.value)}>
@@ -712,7 +787,7 @@ export default function Dashboard() {
                 <div className="desk-pip-heading" onMouseDown={startPipDrag}>
                   <div className="desk-pip-channel" ref={channelPickerRef}>
                     <button className="desk-pip-channel-trigger" onClick={() => { setChannelPickerOpen((value) => !value); setPipSearchOpen(false); }} aria-expanded={channelPickerOpen} aria-label="Choose broadcast channel">
-                      <span>{pipOverride ? pipOverride.name : pipChannel.name}</span><ChevronDown size={13} />
+                      <span>{pipOverride ? pipOverride.title : pipChannel.name}</span><ChevronDown size={13} />
                     </button>
                     {channelPickerOpen && (
                       <div className="desk-pip-channel-menu" role="listbox" aria-label="Broadcast channels">
@@ -742,7 +817,7 @@ export default function Dashboard() {
                             <div className="desk-pip-search-results">
                               {pipSearchResults.map((result) => (
                                 <button key={result.videoId} className={pipOverride?.videoId === result.videoId ? "is-active" : ""}
-                                  onClick={() => { setPipOverride({ name: result.title, videoId: result.videoId }); setPipSearchOpen(false); }}>
+                                  onClick={() => { setPipOverride({ title: result.title, videoId: result.videoId }); setPipSearchOpen(false); }}>
                                   {result.title}
                                 </button>
                               ))}
@@ -753,12 +828,7 @@ export default function Dashboard() {
                   </div>
                   <button aria-label="Close mini player" onClick={() => setPipDismissed(true)}><X size={15} /></button>
                 </div>
-                <div className="desk-pip-video">
-                  {pipOverride ? <iframe key={pipOverride.videoId} src={`https://www.youtube.com/embed/${pipOverride.videoId}?autoplay=1&mute=1&controls=0&rel=0`} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipOverride.name} Live`} />
-                    : pipChannel.hlsUrl ? <HlsVideo key={pipChannel.hlsUrl} src={pipChannel.hlsUrl} title={`${pipChannel.name} Live`} />
-                    : pipChannel.directEmbedUrl ? <iframe src={pipChannel.directEmbedUrl} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} />
-                    : pipChannel.videoId ? <iframe src={`https://www.youtube.com/embed/${pipChannel.videoId}?autoplay=1&mute=1&controls=0&rel=0`} allow="autoplay; encrypted-media; picture-in-picture" title={`${pipChannel.name} Live`} /> : null}
-                </div>
+                <div className="desk-pip-video" ref={setPipVideoHost} />
               </div>
             )}
           </div>

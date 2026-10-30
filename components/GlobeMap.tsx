@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Event } from "@/lib/types";
 import { categoryMeta } from "@/lib/categories";
-import { fireSymbol, infrastructureSymbol, reportSymbol, stormSymbol, vesselSymbol, flightSymbol, type MapSymbol } from "@/lib/map-symbols";
+import { fireSymbol, infrastructureSymbol, reportSymbol, stormSymbol, vesselSymbol, flightSymbol, cyberThreatSymbol, volcanoSymbol, type MapSymbol } from "@/lib/map-symbols";
 import { ConflictZoneData } from "./ConflictZoneDetailPanel";
 import type { MilitaryBaseDetail } from "@/lib/data/military-base-details";
 import type { PortDetail } from "@/lib/data/port-details";
@@ -36,6 +36,9 @@ interface MapLayers {
   fleetTracker: boolean;
   countries: boolean;
   flights: boolean;
+  internetOutages: boolean;
+  cyberThreats: boolean;
+  volcanoes: boolean;
 }
 
 interface GeoJsonFeature {
@@ -149,6 +152,41 @@ interface GpsJamHex {
   totalAircraft: number;
 }
 
+interface CountryOutage {
+  code: string;
+  name: string;
+  lat: number;
+  lng: number;
+  level: "warning" | "critical";
+  datasource: string;
+  time: number;
+  radiusMeters: number;
+}
+
+interface CyberThreat {
+  ip: string;
+  lat: number;
+  lng: number;
+  country: string | null;
+  attacks: number;
+  reports: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+interface Volcano {
+  id: number;
+  name: string;
+  type: string | null;
+  country: string | null;
+  region: string | null;
+  lat: number;
+  lng: number;
+  elevation: number | null;
+  lastEruptionYear: number | null;
+  summary: string | null;
+}
+
 interface CableFeature {
   id: string;
   name: string;
@@ -195,7 +233,7 @@ interface MapLayerData {
 
 interface GlobePoint {
   id: string;
-  kind: "gpsJam";
+  kind: "gpsJam" | "outage";
   lat: number;
   lng: number;
   color: string;
@@ -225,7 +263,7 @@ interface GlobeLayerMarker {
   altitude: number;
   symbol: MapSymbol;
   label: string;
-  kind: "naval" | "wildfire" | "storm" | "flight";
+  kind: "naval" | "wildfire" | "storm" | "flight" | "cyberThreat" | "volcano";
 }
 
 // Popup state shared by event/military-base markers and country clicks —
@@ -480,6 +518,9 @@ export default function GlobeMap({
   storms = [],
   gpsJamHexes = [],
   flights = [],
+  internetOutages = [],
+  cyberThreats = [],
+  volcanoes = [],
   onSelectConflictZone,
   selectedMilitaryBase = null,
   onSelectMilitaryBase,
@@ -505,6 +546,9 @@ export default function GlobeMap({
   storms?: Storm[];
   gpsJamHexes?: GpsJamHex[];
   flights?: Flight[];
+  internetOutages?: CountryOutage[];
+  cyberThreats?: CyberThreat[];
+  volcanoes?: Volcano[];
   onSelectConflictZone?: (zone: ConflictZoneData) => void;
   selectedMilitaryBase?: MilitaryBaseFeature | null;
   onSelectMilitaryBase?: (base: MilitaryBaseFeature) => void;
@@ -928,8 +972,29 @@ export default function GlobeMap({
       );
     }
 
+    // Country-level outages use the same true-scale hex-prism treatment as
+    // GPS jamming (points-layer with pointResolution=6, radius in globe
+    // degrees ~ meters / 111km) rather than a fixed-pixel pin — same single
+    // red hue, shaded darker/more opaque for the more severe level, mirroring
+    // GPS jamming's high/medium shading.
+    if (activeLayers.internetOutages) {
+      layerPoints.push(
+        ...internetOutages.map((outage) => ({
+          id: `outage-${outage.code}`,
+          kind: "outage" as const,
+          lat: outage.lat,
+          lng: outage.lng,
+          color: outage.level === "critical" ? "#7f1d1d" : "#f87171",
+          radius: outage.radiusMeters / 111000,
+          altitude: FLAT_ALTITUDE,
+          label: `📶 ${outage.name} — ${outage.level === "critical" ? "Critical" : "Warning"} connectivity drop (${outage.datasource})`,
+        }))
+      );
+    }
+
     return [...layerPoints];
-  }, [activeLayers.gpsJamming, gpsJamHexes]);
+  }, [activeLayers.gpsJamming, gpsJamHexes, activeLayers.internetOutages, internetOutages]);
+
 
   // Shared static SVG artwork keeps the two map modes' category and asset
   // meanings aligned without changing the marker popup/selection flow.
@@ -1039,8 +1104,34 @@ export default function GlobeMap({
         label: `✈️ ${flight.callsign}${flight.altitude !== null ? ` — ${flight.altitude.toLocaleString()} ft` : ""}${flight.speed !== null ? `, ${flight.speed} kn` : ""}`,
       }));
     }
+    if (activeLayers.cyberThreats) {
+      cyberThreats.forEach((threat) => markers.push({
+        id: `cyber-${threat.ip}`,
+        kind: "cyberThreat",
+        lat: threat.lat,
+        lng: threat.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: cyberThreatSymbol({ attacks: threat.attacks }),
+        label: `🛡️ ${threat.ip}${threat.country ? ` (${threat.country})` : ""} — ${threat.attacks} reported attacks`,
+      }));
+    }
+    if (activeLayers.volcanoes) {
+      volcanoes.forEach((volcano) => markers.push({
+        id: `volcano-${volcano.id}`,
+        kind: "volcano",
+        lat: volcano.lat,
+        lng: volcano.lng,
+        altitude: FLAT_ALTITUDE,
+        symbol: volcanoSymbol({ lastEruptionYear: volcano.lastEruptionYear }),
+        label: `🌋 ${volcano.name}${volcano.country ? ` (${volcano.country})` : ""}${volcano.lastEruptionYear !== null ? ` — last erupted ${volcano.lastEruptionYear}` : ""}`,
+      }));
+    }
     return markers;
-  }, [activeLayers.navalVessels, activeLayers.wildfires, activeLayers.storms, activeLayers.flights, navalVessels, wildfires, storms, flights]);
+  }, [
+    activeLayers.navalVessels, activeLayers.wildfires, activeLayers.storms, activeLayers.flights,
+    activeLayers.cyberThreats, activeLayers.volcanoes,
+    navalVessels, wildfires, storms, flights, cyberThreats, volcanoes,
+  ]);
 
   const htmlMarkers = useMemo(() => [...layerMarkers, ...eventMarkers], [layerMarkers, eventMarkers]);
 
@@ -1297,6 +1388,7 @@ export default function GlobeMap({
           pointColor="color"
           pointAltitude="altitude"
           pointRadius="radius"
+          pointResolution={6}
           pointLabel="label"
           pointsTransitionDuration={300}
           htmlElementsData={htmlMarkers}

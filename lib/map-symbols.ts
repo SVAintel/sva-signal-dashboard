@@ -119,3 +119,16 @@ export function stormSymbol({ classification }: { classification: string }): Map
   const color = classification === "HU" ? "#ef4444" : classification === "TS" ? "#f97316" : "#facc15";
   return symbol(color, `<g fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M9 12C4 10 6 4 13 4M15 12c5 2 3 8-4 8M12 9c2-5 8-3 8 4M12 15c-2 5-8 3-8-4"/></g>`);
 }
+
+/** Active attacking IP: a crosshair/pulse glyph scaled by attack volume. */
+export function cyberThreatSymbol({ attacks }: { attacks: number }): MapSymbol {
+  const color = attacks > 300 ? "#ef4444" : attacks > 100 ? "#f97316" : "#facc15";
+  return symbol(color, `<g fill="none" stroke="${color}" stroke-width="1.8"><circle cx="12" cy="12" r="6"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke-linecap="round"/><circle cx="12" cy="12" r="1.8" fill="${color}" stroke="none"/></g>`);
+}
+
+/** Volcano marker: color encodes eruption recency (this year vs. last year). */
+export function volcanoSymbol({ lastEruptionYear }: { lastEruptionYear: number | null }): MapSymbol {
+  const currentYear = new Date().getUTCFullYear();
+  const color = lastEruptionYear === currentYear ? "#ef4444" : "#f97316";
+  return symbol(color, `<path d="M4 19l5-11 3 5 2-3 6 9z" fill="${color}" stroke="${OUTLINE}" stroke-width="1.2" stroke-linejoin="round"/><path d="M11 8c.5-1.5 2-1.5 1.5 0-.5 1.2.5 1.5 1 .3" fill="none" stroke="#facc15" stroke-width="1.2" stroke-linecap="round"/>`);
+}

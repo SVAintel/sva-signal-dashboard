@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Search, X } from "lucide-react";
 
 interface Channel {
@@ -48,22 +49,31 @@ export function HlsVideo({ src, title }: { src: string; title: string }) {
   </div>;
 }
 
+export type OverrideChannel = { videoId: string; title: string };
+
 interface LiveBroadcastsProps {
   onActiveChannelChange?: (channel: ActiveLiveChannel | null) => void;
   onChannelsChange?: (channels: Channel[]) => void;
   activeIndex?: number;
   onActiveIndexChange?: (index: number) => void;
+  overrideChannel?: OverrideChannel | null;
+  onOverrideChange?: (value: OverrideChannel | null) => void;
+  /** When provided, the live video surface is portaled into this element instead of rendering inline (e.g. the PiP mini player), so the same stream keeps playing without a new embed. */
+  videoHost?: HTMLElement | null;
+  /** When true, neither the docked panel nor the PiP mini player is shown (fully dismissed) -- actually
+   * tears down the stream so audio/video genuinely stops, instead of merely hiding it with CSS. */
+  stopped?: boolean;
   onClose?: () => void;
 }
 
-export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange, activeIndex, onActiveIndexChange, onClose }: LiveBroadcastsProps) {
+export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange, activeIndex, onActiveIndexChange, overrideChannel, onOverrideChange, videoHost, stopped, onClose }: LiveBroadcastsProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [active, setActive] = useState(0);
   const [channelMenuOpen, setChannelMenuOpen] = useState(false);
   const channelMenuRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [override, setOverride] = useState<{ videoId: string; title: string } | null>(null);
+  const [override, setOverride] = useState<OverrideChannel | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchMenuRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -71,6 +81,28 @@ export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const dockedHostRef = useRef<HTMLDivElement | null>(null);
+  // A single, never-recreated DOM node that actually hosts the live video. It is attached to
+  // document.body exactly once and never reparented again afterwards -- moving an iframe to a
+  // new DOM parent makes the browser reload it, so instead of ever moving this node we just
+  // reposition it (fixed position, synced every frame to whichever slot -- docked or PiP -- is
+  // currently active) on top of wherever it should visually appear. React only ever portals
+  // into this one node (its identity never changes), so the video element is never unmounted.
+  const playerHostRef = useRef<HTMLDivElement | null>(null);
+  if (playerHostRef.current === null && typeof document !== "undefined") {
+    const host = document.createElement("div");
+    host.style.position = "fixed";
+    host.style.zIndex = "900";
+    host.style.display = "none";
+    host.style.background = "#000";
+    playerHostRef.current = host;
+  }
+  useEffect(() => {
+    const host = playerHostRef.current;
+    if (!host) return;
+    document.body.appendChild(host);
+    return () => { host.remove(); };
+  }, []);
   const searchRequest = useRef(0);
   useEffect(() => {
     fetch("/api/live-streams")
@@ -86,6 +118,8 @@ export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange
   }, [onChannelsChange]);
   useEffect(() => { onActiveIndexChange?.(active); }, [active, onActiveIndexChange]);
   useEffect(() => { if (activeIndex !== undefined && activeIndex !== active) setActive(activeIndex); }, [activeIndex]);
+  useEffect(() => { onOverrideChange?.(override); }, [override, onOverrideChange]);
+  useEffect(() => { if (overrideChannel !== undefined && overrideChannel !== override) setOverride(overrideChannel ?? null); }, [overrideChannel]);
   useEffect(() => {
     if (!channelMenuOpen) return;
     const dismiss = (event: PointerEvent) => {
@@ -137,6 +171,57 @@ export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange
     } : null);
   }, [current, onActiveChannelChange]);
 
+  // Built once, then kept visually in sync (via fixed positioning) with whichever slot is active
+  // -- the docked placeholder below, or videoHost (the PiP mini player) -- so dock <-> PiP
+  // transitions reposition the same iframe/video instead of mounting a second, re-muted stream.
+  // When fully dismissed (`stopped`), this is torn down entirely so playback genuinely stops --
+  // merely hiding an iframe with CSS does not stop its audio/video.
+  const rawVideoSurfaceContent = override ? (
+    <iframe key={override.videoId} src={`https://www.youtube.com/embed/${override.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={override.title} />
+  ) : current?.hlsUrl ? <HlsVideo key={current.hlsUrl} src={current.hlsUrl} title={`${current.name} broadcast`} /> : current?.directEmbedUrl ? (
+    <iframe key={current.directEmbedUrl} src={current.directEmbedUrl} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={`${current.name} broadcast`} />
+  ) : current?.videoId ? (
+    <iframe key={current.videoId} src={`https://www.youtube.com/embed/${current.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={`${current.name} broadcast`} />
+  ) : current ? <div className="flex h-full flex-col items-center justify-center gap-3 p-5 text-center">
+    <p className="surface-muted">No embeddable stream is available for {current.name}.</p>
+    <a href={`https://www.youtube.com/channel/${current.channelId}/live`} target="_blank" rel="noopener noreferrer" className="surface-button">Open channel on YouTube</a>
+  </div> : null;
+  const videoSurfaceContent = stopped ? null : rawVideoSurfaceContent;
+
+  // Keep the stable player host positioned exactly over whichever slot (docked panel or PiP
+  // mini player) is currently active, by measuring that slot's on-screen rect every frame and
+  // applying it as a fixed position + size. The player node itself never moves in the DOM, so
+  // its iframe/video never reloads; only its visual position/size changes, continuously
+  // tracking layout changes (sidebar resize, PiP drag, etc.) without extra observers.
+  useEffect(() => {
+    const host = playerHostRef.current;
+    if (!host) return;
+    if (stopped) { host.style.display = "none"; return; }
+    let raf = 0;
+    let lastKey = "";
+    const tick = () => {
+      const target = videoHost ?? dockedHostRef.current;
+      const rect = target ? target.getBoundingClientRect() : null;
+      if (rect && rect.width > 0 && rect.height > 0) {
+        const key = `${rect.top}|${rect.left}|${rect.width}|${rect.height}`;
+        if (key !== lastKey) {
+          host.style.top = `${rect.top}px`;
+          host.style.left = `${rect.left}px`;
+          host.style.width = `${rect.width}px`;
+          host.style.height = `${rect.height}px`;
+          host.style.display = "block";
+          lastKey = key;
+        }
+      } else if (lastKey !== "hidden") {
+        host.style.display = "none";
+        lastKey = "hidden";
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [videoHost, stopped]);
+
   return (
     <section className="broadcast-panel" aria-label="Live broadcasts">
       <div className="broadcast-heading">
@@ -185,20 +270,9 @@ export default function LiveBroadcasts({ onActiveChannelChange, onChannelsChange
         </div>
         {onClose && <button aria-label="Collapse live broadcasts" onClick={onClose}><X size={15} /></button>}
       </div>
-      {loading ? <p className="surface-muted px-4 pb-2" role="status">Loading broadcast sources...</p> : error ? <p className="surface-error px-4 pb-2" role="alert">{error}</p> : !channels.length ? <p className="surface-muted px-4 pb-2">No broadcast sources are available.</p> : <>
-        <div className="w-full bg-black" style={{ aspectRatio: "16/9" }}>
-          {override ? (
-            <iframe key={override.videoId} src={`https://www.youtube.com/embed/${override.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={override.title} />
-          ) : current?.hlsUrl ? <HlsVideo key={current.hlsUrl} src={current.hlsUrl} title={`${current.name} broadcast`} /> : current?.directEmbedUrl ? (
-            <iframe key={current.directEmbedUrl} src={current.directEmbedUrl} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={`${current.name} broadcast`} />
-          ) : current?.videoId ? (
-            <iframe key={current.videoId} src={`https://www.youtube.com/embed/${current.videoId}?autoplay=1&mute=1&controls=1&modestbranding=1&rel=0`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen className="h-full w-full border-0" title={`${current.name} broadcast`} />
-          ) : current ? <div className="flex h-full flex-col items-center justify-center gap-3 p-5 text-center">
-            <p className="surface-muted">No embeddable stream is available for {current.name}.</p>
-            <a href={`https://www.youtube.com/channel/${current.channelId}/live`} target="_blank" rel="noopener noreferrer" className="surface-button">Open channel on YouTube</a>
-          </div> : null}
-        </div>
-      </>}
+      {loading ? <p className="surface-muted px-4 pb-2" role="status">Loading broadcast sources...</p> : error ? <p className="surface-error px-4 pb-2" role="alert">{error}</p> : !channels.length ? <p className="surface-muted px-4 pb-2">No broadcast sources are available.</p> : null}
+      <div className="w-full" style={videoSurfaceContent ? { aspectRatio: "16/9", background: "#000" } : { height: 0, overflow: "hidden" }} ref={dockedHostRef} />
+      {playerHostRef.current && videoSurfaceContent ? createPortal(videoSurfaceContent, playerHostRef.current) : null}
     </section>
   );
 }
